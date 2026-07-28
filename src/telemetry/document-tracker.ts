@@ -20,7 +20,7 @@ const LEGACY_STATE_KEY_V1 = "sweep.tracker.v1";
 // when the user peeks at the Output panel).
 const TRACKABLE_SCHEMES = new Set(["file", "untitled", "vscode-remote"]);
 
-function isTrackable(document: vscode.TextDocument): boolean {
+export function isTrackableDocument(document: vscode.TextDocument): boolean {
 	return TRACKABLE_SCHEMES.has(document.uri.scheme);
 }
 
@@ -126,7 +126,7 @@ export class DocumentTracker implements vscode.Disposable {
 	constructor(context?: vscode.ExtensionContext) {
 		this.context = context;
 		for (const doc of vscode.workspace.textDocuments) {
-			if (!isTrackable(doc)) continue;
+			if (!isTrackableDocument(doc)) continue;
 			this.originalContents.set(doc.uri.toString(), doc.getText());
 			this.documentContents.set(doc.uri.toString(), doc.getText());
 		}
@@ -134,7 +134,7 @@ export class DocumentTracker implements vscode.Disposable {
 	}
 
 	setActiveFile(document: vscode.TextDocument | null): void {
-		if (document && !isTrackable(document)) {
+		if (document && !isTrackableDocument(document)) {
 			// Leave the previous active file in place. Switching focus to
 			// the Output panel, an SCM diff, settings.json (vscode-userdata),
 			// etc. shouldn't drop the real editor's reserved slot.
@@ -144,7 +144,7 @@ export class DocumentTracker implements vscode.Disposable {
 	}
 
 	async trackFileVisit(document: vscode.TextDocument): Promise<void> {
-		if (!isTrackable(document)) return;
+		if (!isTrackableDocument(document)) return;
 		const uri = document.uri.toString();
 
 		if (!this.originalContents.has(uri)) {
@@ -173,7 +173,7 @@ export class DocumentTracker implements vscode.Disposable {
 	}
 
 	trackChange(event: vscode.TextDocumentChangeEvent): void {
-		if (!isTrackable(event.document)) return;
+		if (!isTrackableDocument(event.document)) return;
 		const filepath = toUnixPath(event.document.fileName);
 		const uri = event.document.uri.toString();
 		const now = Date.now();
@@ -260,7 +260,7 @@ export class DocumentTracker implements vscode.Disposable {
 		document: vscode.TextDocument,
 		position: vscode.Position,
 	): void {
-		if (!isTrackable(document)) return;
+		if (!isTrackableDocument(document)) return;
 		const filepath = toUnixPath(document.fileName);
 		const offset = utf8ByteOffsetAt(document, position);
 		const uri = document.uri.toString();
@@ -286,7 +286,7 @@ export class DocumentTracker implements vscode.Disposable {
 		document: vscode.TextDocument,
 		selections: readonly vscode.Selection[],
 	): void {
-		if (!isTrackable(document)) return;
+		if (!isTrackableDocument(document)) return;
 		let hasMultiLine = false;
 		for (const selection of selections) {
 			if (selection.isEmpty) continue;

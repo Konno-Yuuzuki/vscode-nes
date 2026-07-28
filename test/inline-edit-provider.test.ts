@@ -4,6 +4,7 @@ import * as vscode from "vscode";
 import type { ApiClient } from "~/api/client.ts";
 import type { AutocompleteResult } from "~/api/schemas.ts";
 import {
+	type AcceptedInlineSuggestion,
 	InlineEditProvider,
 	inlineEditMatchesSelectedCompletion,
 } from "~/editor/inline-edit-provider.ts";
@@ -49,14 +50,61 @@ function buildItem(
 		?.items[0];
 }
 
+function normalizeResult(
+	document: vscode.TextDocument,
+	position: vscode.Position,
+	result: AutocompleteResult,
+): AutocompleteResult | null {
+	const provider = new InlineEditProvider(
+		{} as DocumentTracker,
+		{} as JumpEditManager,
+		{} as ApiClient,
+	) as unknown as {
+		normalizeInlineResult: (
+			document: vscode.TextDocument,
+			position: vscode.Position,
+			result: AutocompleteResult,
+		) => AutocompleteResult | null;
+	};
+	return provider.normalizeInlineResult(document, position, result);
+}
+
+function applyOneLineItem(
+	text: string,
+	item: vscode.InlineCompletionItem | undefined,
+): string | undefined {
+	if (!item?.range || typeof item.insertText !== "string") return undefined;
+	const start = item.range.start.character;
+	const end = item.range.end.character;
+	return text.slice(0, start) + item.insertText + text.slice(end);
+}
+
 function setMockConfiguration(values: Record<string, unknown>): void {
 	(
 		globalThis as typeof globalThis & { __vscodeMockConfiguration?: unknown }
 	).__vscodeMockConfiguration = values;
 }
 
+function setActiveTextEditor(editor: vscode.TextEditor | undefined): void {
+	(
+		vscode.window as unknown as {
+			activeTextEditor: vscode.TextEditor | undefined;
+		}
+	).activeTextEditor = editor;
+}
+
+function setVisibleTextEditors(editors: readonly vscode.TextEditor[]): void {
+	(
+		vscode.window as unknown as {
+			visibleTextEditors: readonly vscode.TextEditor[];
+		}
+	).visibleTextEditors = editors;
+}
+
 afterEach(() => {
 	setMockConfiguration({});
+	setActiveTextEditor(undefined);
+	setVisibleTextEditors([]);
 });
 
 describe("InlineEditProvider buildCompletionItem", () => {
@@ -123,6 +171,40 @@ describe("InlineEditProvider buildCompletionItem", () => {
 		expect(item?.showInlineEditMenu).toBe(true);
 		expect(item?.showRange).toBeUndefined();
 		expect(item?.displayLocation).toBeUndefined();
+		expect(applyOneLineItem(text, item)).toBe("const value = newValue;");
+	});
+
+	test("uses plain text for proposed replacements with a cursor target", () => {
+		setMockConfiguration({
+			useCopilotStyleNextEditPresentation: true,
+		});
+		const prefix = 'LogDebug("CTextDraw::Draw: ';
+		const text = `${prefix}"))`;
+		const completion = '");';
+		const document = makeOneLineDocument(text);
+
+		const item = buildItem(
+			document,
+			new vscode.Position(0, prefix.length),
+			{
+				id: "proposed-replacement-with-cursor",
+				startIndex: prefix.length,
+				endIndex: text.length,
+				completion,
+				confidence: 0.8,
+				cursorTargetOffset: 0,
+			},
+			{ useProposedInlineEditPresentation: true },
+		) as vscode.InlineCompletionItem & { isInlineEdit?: boolean };
+
+		expect(item?.isInlineEdit).toBe(true);
+		expect(typeof item?.insertText).toBe("string");
+		expect(applyOneLineItem(text, item)).toBe(`${prefix}");`);
+		const accepted = item?.command?.arguments?.[0] as
+			| AcceptedInlineSuggestion
+			| undefined;
+		expect(accepted?.cursorTargetOffset).toBe(0);
+		expect(accepted?.uri).toBe(document.uri.toString());
 	});
 
 	test("uses the custom jump fallback by default", () => {
@@ -155,6 +237,132 @@ describe("InlineEditProvider buildCompletionItem", () => {
 
 		expect(item).toBeUndefined();
 		expect(fallbackResult?.id).toBe("before-cursor-custom-jump");
+	});
+});
+
+describe("InlineEditProvider handleInlineAccept", () => {
+	test("restores the predicted cursor after a proposed plain-text edit", () => {
+		const prefix = 'LogDebug("CTextDraw::Draw: ';
+		const document = makeOneLineDocument(`${prefix}");`);
+		const editor = {
+			document,
+			selection: new vscode.Selection(
+				new vscode.Position(0, document.getText().length),
+				new vscode.Position(0, document.getText().length),
+			),
+			revealRange: () => {},
+		} as unknown as vscode.TextEditor;
+		setActiveTextEditor(editor);
+
+		const provider = new InlineEditProvider(
+			{} as DocumentTracker,
+			{} as JumpEditManager,
+			{} as ApiClient,
+		);
+		provider.handleInlineAccept({
+			id: "accepted-proposed-edit",
+			uri: document.uri.toString(),
+			startIndex: prefix.length,
+			endIndex: prefix.length + 3,
+			completion: '");',
+			cursorTargetOffset: 0,
+		});
+
+		expect(editor.selection.active.character).toBe(prefix.length);
+	});
+});
+
+describe("InlineEditProvider recent context", () => {
+	test("excludes Output-channel logs from visible editor buffers", () => {
+		const logDocument = {
+			uri: {
+				scheme: "output",
+				toString: () => "output:SR-team.nesweep.NESweep.log",
+			},
+		} as vscode.TextDocument;
+		setVisibleTextEditors([{ document: logDocument } as vscode.TextEditor]);
+
+		const provider = new InlineEditProvider(
+			{} as DocumentTracker,
+			{} as JumpEditManager,
+			{} as ApiClient,
+		) as unknown as {
+			buildVisibleEditorBuffers: (currentUri: string) => AutocompleteResult[];
+		};
+
+		expect(
+			provider.buildVisibleEditorBuffers("file:///project/test.cpp"),
+		).toEqual([]);
+	});
+});
+
+describe("InlineEditProvider normalizeInlineResult", () => {
+	test("trimming an unchanged prefix preserves the replacement tail", () => {
+		const text = "foo(oldCode);";
+		const document = makeOneLineDocument(text);
+		const cursorOffset = "foo(old".length;
+		const normalized = normalizeResult(
+			document,
+			new vscode.Position(0, cursorOffset),
+			{
+				id: "replacement-crosses-cursor",
+				startIndex: "foo(".length,
+				endIndex: "foo(oldCode".length,
+				completion: "oldNewCode",
+				confidence: 0.8,
+			},
+		);
+
+		expect(normalized).not.toBeNull();
+		if (!normalized) return;
+		expect(normalized.startIndex).toBe(cursorOffset);
+		expect(normalized.endIndex).toBe("foo(oldCode".length);
+		expect(normalized.completion).toBe("NewCode");
+		const accepted =
+			text.slice(0, normalized.startIndex) +
+			normalized.completion +
+			text.slice(normalized.endIndex);
+		expect(accepted).toBe("foo(oldNewCode);");
+		expect(accepted).not.toContain("NewCodeCode");
+	});
+
+	test("preserves an empty completion when it deletes a non-empty range", () => {
+		setMockConfiguration({
+			useCopilotStyleNextEditPresentation: true,
+		});
+		const text = "keep obsolete";
+		const document = makeOneLineDocument(text);
+		const startIndex = "keep ".length;
+		const normalized = normalizeResult(
+			document,
+			new vscode.Position(0, startIndex),
+			{
+				id: "pure-deletion",
+				startIndex,
+				endIndex: text.length,
+				completion: "",
+				confidence: 0.8,
+			},
+		);
+
+		expect(normalized).not.toBeNull();
+		if (!normalized) return;
+		expect(normalized.completion).toBe("");
+		expect(normalized.endIndex).toBe(text.length);
+		const accepted =
+			text.slice(0, normalized.startIndex) +
+			normalized.completion +
+			text.slice(normalized.endIndex);
+		expect(accepted).toBe("keep ");
+
+		const item = buildItem(
+			document,
+			new vscode.Position(0, startIndex),
+			normalized,
+			{ useProposedInlineEditPresentation: true },
+		) as vscode.InlineCompletionItem & { isInlineEdit?: boolean };
+		expect(item?.isInlineEdit).toBe(true);
+		expect(applyOneLineItem(text, item)).toBe("keep ");
 	});
 });
 

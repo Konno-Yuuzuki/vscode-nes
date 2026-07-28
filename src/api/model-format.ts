@@ -16,14 +16,11 @@ export interface PromptLine {
 	content: string;
 }
 
-// One editable region inside the prompt. zeta2.1 supports multi-region
-// edits — the prompt may carry a sequence of `<|marker_{2k-1}|>` …
-// `<|marker_{2k}|>` pairs, each describing an independently-editable
-// span. The primary region holds the cursor and becomes the inline
-// ghost-text suggestion; secondary regions become queued jump-edit
-// suggestions. For sweep / zeta2.0 we always have exactly one region
-// (single-region formats), and the response parser ignores anything
-// past the first.
+// One focused region inside the prompt. For zeta2.1, each region's start
+// and end become consecutive numbered boundaries in a single editable
+// excerpt. A response can rewrite the text between any two boundaries,
+// including across focused regions. For sweep / zeta2.0 we always have
+// exactly one region.
 export interface EditRegion {
 	// 0-indexed half-open line range in the document.
 	startLine: number;
@@ -50,9 +47,9 @@ export interface ModelPrompt {
 	// populate `regions[]` with the full set including secondary spans.
 	windowStartLine: number;
 	windowEndLine: number;
-	// Editable regions, ordered by start line. Always non-empty (the
-	// first / primary region carries the cursor). zeta2.1 may have
-	// multiple; sweep / zeta2.0 always have one.
+	// Focused regions, ordered by start line. Always non-empty; the region
+	// marked primary carries the cursor. zeta2.1 may have multiple and
+	// flattens their start/end lines into numbered marker boundaries.
 	regions: EditRegion[];
 	// Full file lines + byte offsets. The response parser indexes into these
 	// to produce a UTF-8 byte-offset edit. These reflect the *undecorated*

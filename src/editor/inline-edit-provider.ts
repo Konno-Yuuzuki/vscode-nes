@@ -9,7 +9,10 @@ import {
 	markAsProposedInlineEdit,
 	type ProposedInlineCompletionDisplayLocation,
 } from "~/editor/proposed-inline-edit.ts";
-import type { DocumentTracker } from "~/telemetry/document-tracker.ts";
+import {
+	type DocumentTracker,
+	isTrackableDocument,
+} from "~/telemetry/document-tracker.ts";
 import { toUnixPath } from "~/utils/path.ts";
 import { isFileTooLarge, utf8ByteOffsetAt } from "~/utils/text.ts";
 
@@ -33,11 +36,17 @@ interface RequestSnapshot {
 	cursorOffset: number;
 }
 
-interface AcceptedInlineSuggestion {
+export interface AcceptedInlineSuggestion {
 	id: string;
+	uri: string;
 	startIndex: number;
 	endIndex: number;
 	completion: string;
+	// Proposed inline edits must use plain text because VS Code's snippet
+	// acceptance path can minimize the deletion range while still inserting
+	// the full snippet. When present, restore the model's cursor after the
+	// plain-text replacement has been accepted.
+	cursorTargetOffset?: number;
 }
 
 interface CompletionItemBuildOptions {
@@ -606,12 +615,18 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 
 		const acceptedSuggestion: AcceptedInlineSuggestion = {
 			id: result.id,
+			uri: document.uri.toString(),
 			startIndex: result.startIndex,
 			endIndex: result.endIndex,
 			completion: result.completion,
+			...(useProposedInlineEditPresentation &&
+			result.cursorTargetOffset !== undefined
+				? { cursorTargetOffset: result.cursorTargetOffset }
+				: {}),
 		};
 		const insertText =
-			result.cursorTargetOffset !== undefined
+			result.cursorTargetOffset !== undefined &&
+			!useProposedInlineEditPresentation
 				? toSnippetWithCursor(result.completion, result.cursorTargetOffset)
 				: result.completion;
 		const item = new vscode.InlineCompletionItem(insertText, editRange);
@@ -721,6 +736,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 			this.lastInlineEdit = null;
 		}
 		if (!acceptedSuggestion) return;
+		this.placeCursorAfterPlainTextAccept(acceptedSuggestion);
 		this.adjustQueuedSuggestionsAfterAccept(acceptedSuggestion);
 		if (this.queuedSuggestions?.suggestions.length) {
 			this.shouldConsumeQueuedSuggestion = true;
@@ -736,6 +752,34 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		// stall until the user types more. cursortab.nvim immediately asks
 		// for the next prediction after accept; mirror that here.
 		void vscode.commands.executeCommand("editor.action.inlineSuggest.trigger");
+	}
+
+	private placeCursorAfterPlainTextAccept(
+		acceptedSuggestion: AcceptedInlineSuggestion,
+	): void {
+		if (acceptedSuggestion.cursorTargetOffset === undefined) return;
+		const editor = vscode.window.activeTextEditor;
+		if (!editor || editor.document.uri.toString() !== acceptedSuggestion.uri) {
+			return;
+		}
+
+		// InlineCompletionItem.command runs after VS Code applies insertText.
+		// The prefix before startIndex is unchanged, so the post-edit target
+		// is startIndex plus the model's UTF-16 offset within the replacement.
+		const targetOffset = Math.min(
+			acceptedSuggestion.startIndex + acceptedSuggestion.cursorTargetOffset,
+			editor.document.getText().length,
+		);
+		const target = editor.document.positionAt(Math.max(0, targetOffset));
+		editor.selection = new vscode.Selection(target, target);
+		editor.revealRange(
+			new vscode.Range(target, target),
+			vscode.TextEditorRevealType.InCenterIfOutsideViewport,
+		);
+		logger.debug("Inline edit cursor placed at predicted position", {
+			line: target.line + 1,
+			character: target.character,
+		});
 	}
 
 	private clearInlineEdit(
@@ -860,7 +904,11 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 					endIndex: suggestion.endIndex + adjustment,
 				};
 			})
-			.filter((suggestion) => suggestion.completion.length > 0);
+			.filter(
+				(suggestion) =>
+					suggestion.completion.length > 0 ||
+					suggestion.endIndex > suggestion.startIndex,
+			);
 	}
 
 	private isNoOpSuggestion(
@@ -1051,6 +1099,10 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		for (const editor of vscode.window.visibleTextEditors) {
 			const document = editor.document;
 			if (document.uri.toString() === currentUri) continue;
+			// Output/log, SCM, settings, and other virtual documents can
+			// contain previous prompts and model marker tokens. Feeding those
+			// back as recent context causes recursive prompt contamination.
+			if (!isTrackableDocument(document)) continue;
 
 			const range = this.getPrimaryVisibleRange(editor);
 			const focusLine = editor.selection.active.line;
@@ -1210,12 +1262,18 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		const trimmedCompletion = result.completion.slice(
 			prefixBeforeCursor.length,
 		);
-		if (trimmedCompletion.length === 0) return null;
+		const trimmedEndIndex = Math.max(cursorOffset, result.endIndex);
+		if (trimmedCompletion.length === 0 && trimmedEndIndex === cursorOffset) {
+			return null;
+		}
 
 		const trimmedResult: AutocompleteResult = {
 			...result,
 			startIndex: cursorOffset,
-			endIndex: cursorOffset,
+			// Trimming the unchanged prefix moves only the start of the
+			// edit. Preserve any original range after the cursor so accepting
+			// the suggestion still removes the old suffix.
+			endIndex: trimmedEndIndex,
 			completion: trimmedCompletion,
 		};
 		if (result.cursorTargetOffset !== undefined) {
@@ -1234,20 +1292,26 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		position: vscode.Position,
 		result: AutocompleteResult,
 	): AutocompleteResult | null {
-		if (!result.completion) return null;
+		if (result.completion.length === 0) {
+			return result.endIndex > result.startIndex ? result : null;
+		}
 
 		const cursorOffset = document.offsetAt(position);
 		const documentLength = document.getText().length;
+		// Only text after the replacement range survives acceptance. Looking
+		// from the cursor can mistake the old text being replaced for a
+		// suffix overlap and truncate the new completion.
+		const lookaheadOffset = Math.max(cursorOffset, result.endIndex);
 		const maxLookahead = Math.min(
-			documentLength - cursorOffset,
+			documentLength - lookaheadOffset,
 			result.completion.length,
 		);
 		if (maxLookahead <= 0) return result;
 
 		const followingText = document.getText(
 			new vscode.Range(
-				position,
-				document.positionAt(cursorOffset + maxLookahead),
+				document.positionAt(lookaheadOffset),
+				document.positionAt(lookaheadOffset + maxLookahead),
 			),
 		);
 

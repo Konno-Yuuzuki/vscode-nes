@@ -1,17 +1,11 @@
 // Postprocessing for Zeta2 / Zeta2.1 model output. Mirrors parseCompletion
-// in cursortab.nvim's server/provider/zeta2/zeta2.go for the 2.0 path,
-// extended for the 2.1 paired-marker layout (with optional multi-region
-// support). Strips end-of-edit markers, short-circuits on the NO_EDITS
-// sentinel (2.0), strips <|user_cursor|> markers, then maps each
-// editable-region replacement to a UTF-8 byte-offset edit on the user's
-// document.
+// in cursortab.nvim's server/provider/zeta2/zeta2.go for the 2.0 path.
+// Zeta2.1 uses numbered boundaries: the first and last markers emitted by
+// the model identify the original document span replaced by the text
+// between them.
 //
-// Returns an array because zeta2.1 multi-region prompts can carry up to
-// MAX_REGIONS pairs and the model may emit a replacement for each. The
-// primary (cursor) region is always first in the returned array; the
-// editor renders it as ghost text and queues the rest as jump edits.
-// Single-region prompts (sweep, 2.0, 2.1-with-no-extras) return an array
-// of one.
+// The common API returns an array, but a Zeta2.1 response represents one
+// contiguous marker span and therefore produces at most one edit.
 //
 // Unlike Sweep, the model output is *only* the new editable region (not
 // a full window rewrite), so trimCommonEnds runs against the editable
@@ -23,6 +17,7 @@ import type { EditRegion, ModelPrompt } from "./model-format.ts";
 import type { AutocompleteResponse } from "./schemas.ts";
 import { stripInjectedFixmesFromLines } from "./sweep-completion.ts";
 import {
+	ZETA2_1_EOS_MARKER,
 	ZETA2_CURSOR_MARKER,
 	ZETA2_END_MARKER,
 	ZETA2_NO_EDITS,
@@ -47,59 +42,52 @@ export function buildZeta2Response(
 
 	const responses: AutocompleteResponse[] = [];
 
-	if (prompt.format === "zeta2.1" && regions.length > 1) {
-		// Multi-region path: split the model output by paired numbered
-		// markers, one replacement per region. A region with no matching
-		// pair (model decided not to edit it) is skipped silently.
-		const replacements = parseRegionReplacements(completion.text);
-		// Emit primary first so the editor renders it as ghost text and
-		// queues the rest as jump edits.
-		const ordered: EditRegion[] = [
-			primary,
-			...regions.filter((r) => r !== primary),
-		];
-		ordered.forEach((region, displayIdx) => {
-			const regionIdx = regions.indexOf(region);
-			const replacement = replacements.get(regionIdx);
-			if (replacement === undefined) return;
-			const id =
-				displayIdx === 0
-					? autocompleteId
-					: `${autocompleteId}-r${regionIdx + 1}`;
+	if (prompt.format === "zeta2.1") {
+		const markerSpan = parseMarkerSpan(completion.text, regions, primary);
+		if (markerSpan) {
 			const response = buildRegionResponse(
-				replacement,
-				region,
+				markerSpan.replacement,
+				markerSpan.region,
 				prompt,
-				id,
+				autocompleteId,
 				completion.finishReason,
 			);
 			if (response) responses.push(response);
-		});
-	} else {
-		// Single-region path (sweep / 2.0 / 2.1 with no extra regions).
-		// Strip the end-of-edit scaffolding once, then run a single-
-		// region diff against the primary region.
-		let cleaned = completion.text;
-		if (prompt.format === "zeta2.1") {
-			// Strip every marker_1 / marker_2 token globally — the model
-			// occasionally emits stray markers mid-output (multi-region
-			// hallucination); leftover ones would render as literal
-			// `<|marker_…|>` text inside the suggestion. The tokens are
-			// model-specific and won't appear in real source code.
-			cleaned = cleaned.replace(/<\|marker_1\|>\n?/g, "");
-			cleaned = cleaned.replace(/\n?<\|marker_2\|>/g, "");
+		} else if (NUMBERED_MARKER_RE.test(completion.text)) {
+			// Numbered markers were present but did not form a safe,
+			// increasing span. Falling back to the primary window here can
+			// apply correct-looking text to the wrong part of the file.
+			logger.debug("zeta2.1 response contained an invalid marker span");
+			return null;
 		} else {
-			// 2.0 / sweep-on-zeta2: strip trailing >>>>>>> UPDATED.
-			if (cleaned.endsWith(ZETA2_END_MARKER)) {
-				cleaned = cleaned.slice(0, -ZETA2_END_MARKER.length);
-			} else {
-				const trimmed = ZETA2_END_MARKER.replace(/\n$/, "");
-				if (cleaned.endsWith(trimmed)) {
-					cleaned = cleaned.slice(0, -trimmed.length);
-				}
-			}
-			if (cleaned.trimStart().startsWith(ZETA2_NO_EDITS)) return null;
+			// Lenient fallback for servers/checkpoints that omit both
+			// boundary markers and return the primary replacement directly.
+			const cleaned = stripZeta21Eos(completion.text);
+			if (cleaned.trim() === "") return null;
+			const response = buildRegionResponse(
+				cleaned,
+				primary,
+				prompt,
+				autocompleteId,
+				completion.finishReason,
+			);
+			if (response) responses.push(response);
 		}
+	} else {
+		// 2.0 single-region path. Strip the end-of-edit scaffolding once,
+		// then run a diff against the primary region.
+		let cleaned = completion.text;
+		// Strip trailing >>>>>>> UPDATED.
+		if (cleaned.endsWith(ZETA2_END_MARKER)) {
+			cleaned = cleaned.slice(0, -ZETA2_END_MARKER.length);
+		} else {
+			const trimmed = ZETA2_END_MARKER.replace(/\n$/, "");
+			if (cleaned.endsWith(trimmed)) {
+				cleaned = cleaned.slice(0, -trimmed.length);
+			}
+		}
+		if (cleaned.trim() === "") return null;
+		if (cleaned.trimStart().startsWith(ZETA2_NO_EDITS)) return null;
 		const response = buildRegionResponse(
 			cleaned,
 			primary,
@@ -113,18 +101,23 @@ export function buildZeta2Response(
 	return responses.length > 0 ? responses : null;
 }
 
-// Parse a multi-region 2.1 response into a map of region index →
-// replacement content. Region index is derived from the open marker
-// number: marker_1/2 → region 0, marker_3/4 → region 1, marker_5/6 →
-// region 2, etc.
-//
-// Lenient on close markers: if an open's matching close is missing
-// (model emitted its native EOS instead of `<|marker_2|>`, or got cut
-// off mid-stream), the content extends to the next open marker, or
-// to end-of-text if no further markers exist. Strict on numbering:
-// an open whose immediately-following marker is the wrong even number
-// is dropped as malformed.
-function parseRegionReplacements(text: string): Map<number, string> {
+const NUMBERED_MARKER_RE = /<\|marker_\d+\|>/;
+
+interface MarkerSpan {
+	replacement: string;
+	region: EditRegion;
+}
+
+// Extract one Zeta2.1 marker span. Marker numbers index document boundaries,
+// not independent region pairs: marker_2 → marker_3 replaces the unchanged
+// gap between focused regions, while marker_1 → marker_4 replaces the whole
+// excerpt. A single marker is accepted as a compatibility fallback for
+// servers that strip the adjacent closing boundary as a stop sequence.
+function parseMarkerSpan(
+	text: string,
+	regions: EditRegion[],
+	primary: EditRegion,
+): MarkerSpan | null {
 	type MarkerHit = { num: number; start: number; end: number };
 	const re = /<\|marker_(\d+)\|>/g;
 	const hits: MarkerHit[] = [];
@@ -138,38 +131,44 @@ function parseRegionReplacements(text: string): Map<number, string> {
 		});
 	}
 
-	const map = new Map<number, string>();
-	for (let i = 0; i < hits.length; i++) {
-		const open = hits[i];
-		if (!open || open.num % 2 !== 1 || open.num < 1) continue;
-		const regionIdx = (open.num - 1) / 2;
-		if (map.has(regionIdx)) continue; // first writer wins
+	if (hits.length === 0 || hits.length > 2) return null;
+	const start = hits[0];
+	if (!start || start.num < 1) return null;
+	const explicitEnd = hits[1];
+	const endMarkerNum = explicitEnd?.num ?? start.num + 1;
+	if (endMarkerNum <= start.num) return null;
 
-		const next = hits[i + 1];
-		let contentEnd: number;
-		if (!next) {
-			// Truncated last pair — model didn't emit a close. Take
-			// everything to end of text.
-			contentEnd = text.length;
-		} else if (next.num === open.num + 1) {
-			// Properly closed.
-			contentEnd = next.start;
-		} else if (next.num % 2 === 1) {
-			// Another open marker before our close. Treat the current
-			// region as truncated and let its content end at the next
-			// open's start so the back-to-back regions parse cleanly.
-			contentEnd = next.start;
-		} else {
-			// Wrong close number (e.g. open=1 followed by marker_4 with
-			// no marker_2 between). Malformed — drop.
-			continue;
-		}
-
-		let content = text.slice(open.end, contentEnd);
-		content = content.replace(/^\n/, "").replace(/\n$/, "");
-		map.set(regionIdx, content);
+	// Marker numbering follows appendCursorFileBodyAndMarkers exactly:
+	// [region0.start, region0.end, region1.start, region1.end, ...].
+	const boundaryLines = regions.flatMap((region) => [
+		region.startLine,
+		region.endLine,
+	]);
+	const startLine = boundaryLines[start.num - 1];
+	const endLine = boundaryLines[endMarkerNum - 1];
+	if (startLine === undefined || endLine === undefined || endLine < startLine) {
+		return null;
 	}
-	return map;
+
+	const contentEnd = explicitEnd?.start ?? text.length;
+	let replacement = stripZeta21Eos(text.slice(start.end, contentEnd));
+	// Markers are rendered on their own lines. Remove only their structural
+	// newline, preserving any additional blank lines produced by the model.
+	replacement = replacement.replace(/^\r?\n/, "").replace(/\r?\n$/, "");
+
+	return {
+		replacement,
+		region: {
+			startLine,
+			endLine,
+			isPrimary: startLine < primary.endLine && endLine > primary.startLine,
+		},
+	};
+}
+
+function stripZeta21Eos(text: string): string {
+	const eosIndex = text.indexOf(ZETA2_1_EOS_MARKER);
+	return eosIndex === -1 ? text : text.slice(0, eosIndex);
 }
 
 // Map one region's replacement text to a UTF-8 byte-offset edit. Shared
@@ -200,7 +199,6 @@ function buildRegionResponse(
 	}
 	text = injectCursorSentinel(text);
 	text = text.replace(/[ \t\n\r]+$/g, "");
-	if (text.replace(SENTINEL, "").trim() === "") return null;
 
 	const stripped = stripRepetition(text);
 	if (stripped === null) return null;

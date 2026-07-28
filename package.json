@@ -2,7 +2,7 @@
 	"name": "nesweep",
 	"displayName": "NESweep autocompletion",
 	"description": "Next Edit Autocomplete using Sweep Model",
-	"version": "1.2.1",
+	"version": "1.2.2",
 	"publisher": "SR-team",
 	"author": {
 		"name": "SR_team"
@@ -222,7 +222,7 @@
 				"sweep.modelName": {
 					"type": "string",
 					"default": "sweepai/sweep-next-edit",
-					"markdownDescription": "Model name sent in the request body's `model` field. The prompt format is auto-selected by substring match against this name:\n\n- **Zeta-2.1 (multi-region)** — names containing `zeta-2.1`, `zeta2.1`, `zeta-2-1`, or `zeta_2_1`. Uses paired numbered markers `<|marker_1|>` / `<|marker_2|>` and supports up to 3 editable regions per request (cursor area + nearby diagnostics).\n- **Zeta-2 (single-region SeedCoder FIM)** — names containing `zeta-2`, `zeta2`, or `seedcoder`. Uses the legacy git-conflict scaffold `<<<<<<< CURRENT` / `=======` / `>>>>>>> UPDATED`.\n- **Sweep `<|file_sep|>` layout** — anything else (including the default `sweepai/sweep-next-edit`). Uses the broad-context + retrieval + `original/current/updated` triplet structure ported from cursortab.nvim."
+					"markdownDescription": "Model name sent in the request body's `model` field. The prompt format is auto-selected by substring match against this name:\n\n- **Zeta-2.1 (multi-region)** — names containing `zeta-2.1`, `zeta2.1`, `zeta-2-1`, or `zeta_2_1`. Uses numbered boundaries such as `<|marker_1|>` / `<|marker_2|>` across one editable excerpt and supports up to 3 focused regions per request (cursor area + nearby diagnostics).\n- **Zeta-2 (single-region SeedCoder FIM)** — names containing `zeta-2`, `zeta2`, or `seedcoder`. Uses the legacy git-conflict scaffold `<<<<<<< CURRENT` / `=======` / `>>>>>>> UPDATED`.\n- **Sweep `<|file_sep|>` layout** — anything else (including the default `sweepai/sweep-next-edit`). Uses the broad-context + retrieval + `original/current/updated` triplet structure ported from cursortab.nvim."
 				},
 				"sweep.completionTimeoutMs": {
 					"type": "number",

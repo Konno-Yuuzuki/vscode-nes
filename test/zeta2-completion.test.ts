@@ -9,6 +9,7 @@ import type {
 } from "~/api/model-format.ts";
 import { computeLineByteOffsets, splitLines } from "~/api/sweep-prompt.ts";
 import { buildZeta2Response } from "~/api/zeta2-completion.ts";
+import { ZETA2_1_EOS_MARKER } from "~/api/zeta2-prompt.ts";
 
 function makePrompt(
 	fileContents: string,
@@ -35,7 +36,8 @@ function makePrompt(
 		prompt: "",
 		prefill: "",
 		format,
-		stopTokens: format === "zeta2.1" ? ["<|marker_2|>"] : [">>>>>>> UPDATED"],
+		stopTokens:
+			format === "zeta2.1" ? [ZETA2_1_EOS_MARKER] : [">>>>>>> UPDATED"],
 		windowStartLine,
 		windowEndLine,
 		regions,
@@ -91,10 +93,7 @@ describe("buildZeta2Response — protocol 2.1 marker handling", () => {
 		expect(responses[0].completion).toBe("b edited");
 	});
 
-	test("strips stray internal markers (multi-region / hallucination)", () => {
-		// Repro for the screenshot bug: 2.1 model occasionally emits an
-		// extra pair of markers mid-output. With a global strip on the
-		// single-region path the internal markers are gone too.
+	test("rejects malformed output with more than two boundary markers", () => {
 		const fileContents = ["line0", "line1", "line2", ""].join("\n");
 		const prompt = makePrompt(
 			fileContents,
@@ -105,11 +104,21 @@ describe("buildZeta2Response — protocol 2.1 marker handling", () => {
 		const modelOutput =
 			"<|marker_1|>\nline0\n<|marker_2|>\n<|marker_1|>\nline1 edited\nline2\n<|marker_2|>";
 		const responses = buildZeta2Response(completion(modelOutput), prompt, "id");
-		expect(responses).not.toBeNull();
-		if (!responses || !responses[0]) return;
-		expect(responses[0].completion).not.toContain("<|marker_1|>");
-		expect(responses[0].completion).not.toContain("<|marker_2|>");
-		expect(responses[0].completion).toBe("line1 edited");
+		expect(responses).toBeNull();
+	});
+
+	test("empty markerless output is a no-op, not a whole-window deletion", () => {
+		const fileContents = ["keep", "everything", ""].join("\n");
+		const prompt = makePrompt(
+			fileContents,
+			0,
+			splitLines(fileContents).length,
+			"zeta2.1",
+		);
+		expect(buildZeta2Response(completion(""), prompt, "id")).toBeNull();
+		expect(
+			buildZeta2Response(completion(ZETA2_1_EOS_MARKER), prompt, "id"),
+		).toBeNull();
 	});
 
 	test("2.0 still strips >>>>>>> UPDATED and respects NO_EDITS", () => {
@@ -130,7 +139,7 @@ describe("buildZeta2Response — protocol 2.1 marker handling", () => {
 		expect(noOp).toBeNull();
 	});
 
-	test("multi-region 2.1 returns one response per pair, primary first", () => {
+	test("multi-region 2.1 maps a later boundary span to its document range", () => {
 		// File with two areas to fix: cursor area on lines 1-3, distant
 		// diagnostic area on lines 6-7.
 		const fileContents = [
@@ -149,39 +158,63 @@ describe("buildZeta2Response — protocol 2.1 marker handling", () => {
 			{ startLine: 6, endLine: 8, isPrimary: false },
 		]);
 
-		// Model emits replacements for both regions in marker order.
+		// marker_3 and marker_4 are the boundaries of the second focused
+		// region. The response is one contiguous edit, not "pair 2" in an
+		// array of independent edits.
 		const modelOutput =
-			"<|marker_1|>\nline0\nspdlog::info();\nline2\nline3\n<|marker_2|>" +
 			"<|marker_3|>\nint x = NAMED_CONSTANT;\nline7\n<|marker_4|>";
 		const responses = buildZeta2Response(completion(modelOutput), prompt, "id");
 		expect(responses).not.toBeNull();
 		if (!responses) return;
-		expect(responses.length).toBe(2);
-
-		// Primary region (cursor) emitted first.
-		expect(responses[0]?.completion).toBe("spdlog::info();");
-
-		// Secondary region next.
-		expect(responses[1]?.completion).toBe("int x = NAMED_CONSTANT;");
-		// Distinct ID for the secondary so the editor can route it.
-		expect(responses[1]?.autocomplete_id).toBe("id-r2");
+		expect(responses.length).toBe(1);
+		expect(responses[0]?.completion).toBe("int x = NAMED_CONSTANT;");
+		expect(responses[0]?.start_index).toBe(fileContents.indexOf("int x = 28;"));
+		expect(responses[0]?.end_index).toBe(
+			fileContents.indexOf("int x = 28;") + "int x = 28;".length,
+		);
+		expect(responses[0]?.autocomplete_id).toBe("id");
 	});
 
-	test("multi-region 2.1 accepts an unclosed last pair (truncated)", () => {
-		// Repro for the screenshot bug: model emits `<|marker_1|>\n…`
-		// with replacement content, but stops on its native EOS instead
-		// of `<|marker_2|>`. The strict pair regex would drop this, but
-		// a forgiving parser should treat content-to-EOF as the region's
-		// replacement.
+	test("marker_2 to marker_3 replaces the gap between focused regions", () => {
+		const fileContents = [
+			"primary0",
+			"primary1",
+			"gap old",
+			"gap keep",
+			"secondary0",
+			"secondary1",
+			"",
+		].join("\n");
+		const prompt = makePrompt(fileContents, 0, 2, "zeta2.1", [
+			{ startLine: 4, endLine: 6, isPrimary: false },
+		]);
+
+		const responses = buildZeta2Response(
+			completion(
+				`<|marker_2|>\ngap new\ngap keep\n<|marker_3|>${ZETA2_1_EOS_MARKER}`,
+			),
+			prompt,
+			"id",
+		);
+		expect(responses).not.toBeNull();
+		if (!responses?.[0]) return;
+		expect(responses[0].start_index).toBe(fileContents.indexOf("gap old"));
+		expect(responses[0].end_index).toBe(
+			fileContents.indexOf("gap old") + "gap old".length,
+		);
+		expect(responses[0].completion).toBe("gap new");
+	});
+
+	test("one boundary marker infers the adjacent closing boundary", () => {
 		const fileContents = ["a", "b", "c", ""].join("\n");
 		const prompt = makePrompt(
 			fileContents,
 			0,
 			splitLines(fileContents).length,
 			"zeta2.1",
-			[{ startLine: 100, endLine: 101, isPrimary: false }], // forces multi-region path
 		);
-		// Note: no `<|marker_2|>` — model didn't close.
+		// Retain compatibility with legacy OpenAI-compatible server configs
+		// that strip a numbered closing boundary as a stop sequence.
 		const modelOutput = "<|marker_1|>\na\nb fixed\nc\n";
 		const responses = buildZeta2Response(completion(modelOutput), prompt, "id");
 		expect(responses).not.toBeNull();
@@ -189,7 +222,7 @@ describe("buildZeta2Response — protocol 2.1 marker handling", () => {
 		expect(responses[0].completion).toBe("b fixed");
 	});
 
-	test("multi-region 2.1 skips regions the model didn't fill", () => {
+	test("a primary marker span remains valid when later boundaries exist", () => {
 		const fileContents = [
 			"line0",
 			"psdlog::info();",
@@ -212,5 +245,69 @@ describe("buildZeta2Response — protocol 2.1 marker handling", () => {
 		if (!responses) return;
 		expect(responses.length).toBe(1);
 		expect(responses[0]?.completion).toBe("spdlog::info();");
+	});
+
+	test("accepting a cross-boundary rewrite removes all replaced old code", () => {
+		const fileContents = [
+			"before",
+			"oldPrimary();",
+			"gap",
+			"oldSecondary();",
+			"after",
+			"",
+		].join("\n");
+		const prompt = makePrompt(fileContents, 0, 2, "zeta2.1", [
+			{ startLine: 3, endLine: 5, isPrimary: false },
+		]);
+		const modelOutput = [
+			"<|marker_1|>",
+			"before",
+			"newPrimary();",
+			"gap",
+			"newSecondary();",
+			"after",
+			"<|marker_4|>",
+		].join("\n");
+
+		const responses = buildZeta2Response(completion(modelOutput), prompt, "id");
+		expect(responses).not.toBeNull();
+		if (!responses?.[0]) return;
+		const response = responses[0];
+		const accepted =
+			fileContents.slice(0, response.start_index) +
+			response.completion +
+			fileContents.slice(response.end_index);
+		expect(accepted).toBe(
+			["before", "newPrimary();", "gap", "newSecondary();", "after", ""].join(
+				"\n",
+			),
+		);
+		expect(accepted).not.toContain("oldPrimary");
+		expect(accepted).not.toContain("oldSecondary");
+	});
+
+	test("preserves a marker-span pure deletion as an empty replacement", () => {
+		const fileContents = ["before", "obsolete();", "after", ""].join("\n");
+		const prompt = makePrompt(
+			fileContents,
+			0,
+			splitLines(fileContents).length,
+			"zeta2.1",
+		);
+		const responses = buildZeta2Response(
+			completion("<|marker_1|>\nbefore\nafter\n<|marker_2|>"),
+			prompt,
+			"id",
+		);
+		expect(responses).not.toBeNull();
+		if (!responses?.[0]) return;
+		const response = responses[0];
+		expect(response.completion).toBe("");
+		expect(response.end_index).toBeGreaterThan(response.start_index);
+		const accepted =
+			fileContents.slice(0, response.start_index) +
+			response.completion +
+			fileContents.slice(response.end_index);
+		expect(accepted).toBe(["before", "after", ""].join("\n"));
 	});
 });

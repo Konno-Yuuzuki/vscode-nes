@@ -288,7 +288,14 @@ export class ApiClient {
 						}
 					}
 				}
-				if (result.completion.length === 0) continue;
+				// Empty replacement text is a meaningful deletion whenever
+				// the response covers a non-empty document range.
+				if (
+					result.completion.length === 0 &&
+					result.endIndex === result.startIndex
+				) {
+					continue;
+				}
 				results.push(result);
 			}
 			if (results.length === 0) return null;

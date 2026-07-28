@@ -38,9 +38,10 @@
 //
 // 2.0 model emits the replacement editable region terminated by
 // ">>>>>>> UPDATED". A literal "NO_EDITS" output means no change.
-// 2.1 model emits "<|marker_1|>\n{replacement}\n<|marker_2|>" — the
-// open marker is echoed in the output and stripped by the response
-// parser, the close marker doubles as the stop token.
+// 2.1 numbered markers are boundaries inside one editable excerpt. The
+// model returns one span from any marker N to a later marker M:
+// "<|marker_N|>\n{replacement}\n<|marker_M|>". The response parser maps
+// those two boundary numbers back to document offsets.
 
 import type { MessageTransform } from "~/core/config.ts";
 import type { EditRegion, ModelPrompt } from "./model-format.ts";
@@ -58,7 +59,8 @@ import {
 } from "./sweep-prompt.ts";
 
 export const ZETA2_STOP_TOKENS = [">>>>>>> UPDATED\n", ">>>>>>> UPDATED"];
-export const ZETA2_1_STOP_TOKENS = ["<|marker_2|>"];
+export const ZETA2_1_EOS_MARKER = "<[end▁of▁sentence]>";
+export const ZETA2_1_STOP_TOKENS = [ZETA2_1_EOS_MARKER];
 
 const FIM_SUFFIX = "<[fim-suffix]>";
 const FIM_PREFIX = "<[fim-prefix]>";
@@ -130,8 +132,8 @@ export interface Zeta2PromptOptions {
 	messageTransforms: MessageTransform[];
 	// Which Zeta SeedCoder protocol the configured model speaks. "2"
 	// uses git-conflict markers around the editable region; "2.1" uses
-	// `<|marker_1|>` / `<|marker_2|>` numbered markers and expects the
-	// model to echo `<|marker_1|>` in its output.
+	// numbered boundary markers and expects the model to return the two
+	// boundaries surrounding its rewritten span.
 	protocolVersion: Zeta2Protocol;
 }
 
@@ -261,12 +263,11 @@ export function buildZeta2Prompt(
 	// Cursor file section
 	body += `${FILE_MARKER}${req.file_path}\n`;
 
-	// Render leading context + every editable region in order. The
-	// cursor file body is sliced into spans of unchanged lines and
-	// regions wrapped in numbered markers (zeta2.1) or in the legacy
-	// CURRENT/=======​ scaffold (zeta2.0, single region only). Code
-	// BEFORE the first region and BETWEEN regions ships verbatim so
-	// the model has the surrounding context for each edit point.
+	// Render leading context + every editable region in order. For 2.1,
+	// each marker is a boundary in one continuous excerpt: region starts
+	// and ends contribute consecutive numbered boundaries, while code
+	// between focused regions remains editable context between those
+	// boundaries. 2.0 keeps its single CURRENT/======= scaffold.
 	const stopTokens = appendCursorFileBodyAndMarkers(
 		(s) => {
 			body += s;
@@ -303,11 +304,10 @@ export function buildZeta2Prompt(
 	};
 }
 
-// Emit every region surrounded by the protocol's open/close markers,
-// with unchanged context lines between them. Returns the appropriate
-// stop-token list (highest-numbered close marker for 2.1; the fixed
-// `>>>>>>> UPDATED` for 2.0). Single-region prompts come out structurally
-// identical to the previous code path.
+// Emit every region with numbered boundaries and unchanged context between
+// them. In 2.1 the markers are not independent open/close pairs: a model
+// response may start at any marker and end at any later marker. Returns the
+// model's EOS token for 2.1 and the fixed `>>>>>>> UPDATED` token for 2.0.
 function appendCursorFileBodyAndMarkers(
 	push: (s: string) => void,
 	promptLines: string[],
@@ -339,8 +339,10 @@ function appendCursorFileBodyAndMarkers(
 		return markers.stopTokens;
 	}
 
-	// 2.1: emit `<|marker_{2k-1}|>{region_k}<|marker_{2k}|>` for each
-	// region in order, separated by the unchanged inter-region lines.
+	// 2.1: emit monotonically numbered boundaries throughout one editable
+	// excerpt. A focused region contributes two boundaries; the unchanged
+	// lines between focused regions sit between the previous end boundary
+	// and the next start boundary.
 	let prevEnd = 0;
 	for (let i = 0; i < regions.length; i++) {
 		const r = regions[i];
@@ -365,11 +367,11 @@ function appendCursorFileBodyAndMarkers(
 		push(`<|marker_${closeNum}|>\n`);
 		prevEnd = r.endLine;
 	}
-	// Stop on the highest-numbered close marker (the LAST region's
-	// close). The API's stop-token logic terminates at the first match,
-	// so the model can't run past the last region we asked for.
-	const lastClose = `<|marker_${regions.length * 2}|>`;
-	return [lastClose];
+	// Never use a numbered boundary as a server stop token: a valid output
+	// can begin with marker_2 (or any later boundary), and stopping on a
+	// marker would either erase the closing boundary or terminate before
+	// the replacement is generated. The model's native EOS is unambiguous.
+	return ZETA2_1_STOP_TOKENS;
 }
 
 // Compute the editable regions for a request. Always includes the
@@ -413,8 +415,8 @@ function computeEditRegions(
 		const dLine = d.line - 1;
 		const start = Math.max(0, dLine - DIAG_REGION_HALO_LINES);
 		const end = Math.min(lineCount, dLine + DIAG_REGION_HALO_LINES + 1);
-		// Skip if it would overlap any region we've already accepted —
-		// adjacent / overlapping marker pairs confuse the model.
+		// Skip if it would overlap any region we've already accepted;
+		// overlapping focus windows would produce non-monotonic boundaries.
 		const overlaps = regions.some(
 			(r) => start < r.endLine && end > r.startLine,
 		);

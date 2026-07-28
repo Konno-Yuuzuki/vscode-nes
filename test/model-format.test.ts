@@ -5,6 +5,7 @@ import type { AutocompleteRequest } from "~/api/schemas.ts";
 import { buildSweepPrompt } from "~/api/sweep-prompt.ts";
 import {
 	buildZeta2Prompt,
+	ZETA2_1_EOS_MARKER,
 	ZETA2_CURRENT_MARKER,
 	ZETA2_CURSOR_MARKER,
 	ZETA2_SEPARATOR,
@@ -141,10 +142,10 @@ describe("buildZeta2Prompt", () => {
 	test("protocolVersion 2.1 swaps to <|marker_1|> / <|marker_2|>", () => {
 		const result = buildZeta2Prompt(makeRequest(), { protocolVersion: "2.1" });
 		expect(result.format).toBe("zeta2.1");
-		expect(result.stopTokens).toEqual(["<|marker_2|>"]);
+		expect(result.stopTokens).toEqual([ZETA2_1_EOS_MARKER]);
 
-		// 2.1 uses paired numbered markers around the editable region —
-		// no git-conflict scaffolding.
+		// A single focused region has two numbered boundaries and no
+		// git-conflict scaffolding.
 		expect(result.prompt).toContain("<|marker_1|>\n");
 		expect(result.prompt).toContain("<|marker_2|>\n");
 		expect(result.prompt).not.toContain(ZETA2_CURRENT_MARKER);
@@ -160,5 +161,36 @@ describe("buildZeta2Prompt", () => {
 		expect(cursorIdx).toBeLessThan(m2);
 		expect(middleIdx).toBeGreaterThan(m2);
 		expect(result.prompt.endsWith("<[fim-middle]>")).toBe(true);
+	});
+
+	test("protocolVersion 2.1 never uses a numbered boundary as a stop token", () => {
+		const lines = Array.from({ length: 80 }, (_, i) => `line${i}`);
+		const fileContents = `${lines.join("\n")}\n`;
+		const cursorPosition = lines.slice(0, 40).join("\n").length + 1;
+		const result = buildZeta2Prompt(
+			makeRequest({
+				file_contents: fileContents,
+				original_file_contents: fileContents,
+				cursor_position: cursorPosition,
+				editor_diagnostics: [
+					{
+						line: 5,
+						start_offset: 0,
+						end_offset: 5,
+						severity: "error",
+						message: "distant error",
+						timestamp: 1,
+					},
+				],
+			}),
+			{ protocolVersion: "2.1", diagRadius: 0 },
+		);
+
+		expect(result.regions.length).toBe(2);
+		expect(result.prompt).toContain("<|marker_4|>");
+		expect(result.stopTokens).toEqual([ZETA2_1_EOS_MARKER]);
+		expect(result.stopTokens.some((token) => token.includes("marker_"))).toBe(
+			false,
+		);
 	});
 });

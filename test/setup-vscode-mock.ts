@@ -35,6 +35,7 @@ mock.module("vscode", () => ({
 	window: {
 		createOutputChannel: () => noopChannel,
 		activeTextEditor: undefined,
+		visibleTextEditors: [],
 		onDidChangeActiveTextEditor: () => ({ dispose: () => {} }),
 		onDidChangeActiveColorTheme: () => ({ dispose: () => {} }),
 		onDidChangeTextEditorSelection: () => ({ dispose: () => {} }),
@@ -112,6 +113,12 @@ mock.module("vscode", () => ({
 	},
 	ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
 	ColorThemeKind: { Light: 1, Dark: 2, HighContrast: 3, HighContrastLight: 4 },
+	TextEditorRevealType: {
+		Default: 0,
+		InCenter: 1,
+		InCenterIfOutsideViewport: 2,
+		AtTop: 3,
+	},
 	TextDocumentChangeReason: { Undo: 1, Redo: 2 },
 	DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
 	Diagnostic: class {

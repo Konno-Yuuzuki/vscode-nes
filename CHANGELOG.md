@@ -2,6 +2,15 @@
 
 Notable NESweep fork changes are documented here, starting from the fork point at `v0.5.0-fork.1`.
 
+## 1.2.2 - 2026-07-28
+
+- Fixed Zeta-2.1 numbered-marker parsing so arbitrary marker spans map to the correct editable line boundaries, including deletion-only edits.
+- Fixed Copilot-style inline edit acceptance so replacing text removes the complete old range and places the cursor at the model-requested position.
+- Preserved replacement ranges through prefix normalization and suffix-overlap trimming, preventing stale code from remaining after acceptance.
+- Rejected malformed or empty Zeta marker responses safely and stopped completions on the model's end-of-sentence token.
+- Excluded NESweep output and log documents from recent-file prompt context to prevent recursive prompt contamination.
+- Added regression coverage for marker parsing, deletions, stale responses, replacement acceptance, and cursor placement.
+
 ## 1.2.1 - 2026-07-20
 
 - Improved prefix caching for Sweep models by moving volatile active-file context to the end of the prompt.

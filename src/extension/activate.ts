@@ -3,7 +3,10 @@ import * as vscode from "vscode";
 import { ApiClient } from "~/api/client.ts";
 import { config } from "~/core/config.ts";
 import { disposeLogger, initLogger, logger } from "~/core/logger.ts";
-import { InlineEditProvider } from "~/editor/inline-edit-provider.ts";
+import {
+	type AcceptedInlineSuggestion,
+	InlineEditProvider,
+} from "~/editor/inline-edit-provider.ts";
 import { JumpEditManager } from "~/editor/jump-edit-manager.ts";
 import { registerInlineCompletionItemProviderWithMetadata } from "~/editor/proposed-inline-edit.ts";
 import {
@@ -82,16 +85,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	const acceptInlineEditCommand = vscode.commands.registerCommand(
 		"sweep.acceptInlineEdit",
-		(
-			acceptedSuggestion:
-				| {
-						id: string;
-						startIndex: number;
-						endIndex: number;
-						completion: string;
-				  }
-				| undefined,
-		) => {
+		(acceptedSuggestion: AcceptedInlineSuggestion | undefined) => {
 			provider.handleInlineAccept(acceptedSuggestion);
 		},
 	);

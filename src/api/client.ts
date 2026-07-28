@@ -7,6 +7,7 @@ import {
 	DEFAULT_MAX_RECENT_CHANGES_CHARS,
 	MAX_TOKENS,
 	TEMPERATURE,
+	ZETA_TRAINING_TEMPLATE_MAX_EDIT_EVENTS,
 } from "~/core/constants.ts";
 import { logger } from "~/core/logger.ts";
 import type { CompletionServer } from "~/services/completion-server.ts";
@@ -17,7 +18,11 @@ import {
 	utf8ByteOffsetToUtf16Offset,
 } from "~/utils/text.ts";
 import type { CompletionResult } from "./completion-client.ts";
-import { detectModelFormat, type ModelPrompt } from "./model-format.ts";
+import {
+	detectModelFormat,
+	type ModelFormat,
+	type ModelPrompt,
+} from "./model-format.ts";
 import {
 	fuseAndDedupRetrievalSnippets,
 	orderRetrievalChunks,
@@ -37,8 +42,15 @@ import {
 } from "./schemas.ts";
 import { buildSweepResponse } from "./sweep-completion.ts";
 import { buildSweepPrompt } from "./sweep-prompt.ts";
+import {
+	formatSymbolOutline,
+	type OutlineSymbolLike,
+} from "./symbol-outline.ts";
 import { buildZeta2Response } from "./zeta2-completion.ts";
-import { buildZeta2Prompt } from "./zeta2-prompt.ts";
+import {
+	buildZeta2Prompt,
+	selectZetaCursorWindowFromLineProvider,
+} from "./zeta2-prompt.ts";
 
 export interface AutocompleteInput {
 	document: vscode.TextDocument;
@@ -59,6 +71,26 @@ const MAX_CLIPBOARD_LINES = 20;
 const MAX_DIAGNOSTICS = 15;
 const RECENT_CHANGE_TRUNCATION_MARKER = "\n...[truncated]\n";
 const MIN_TRUNCATED_RECENT_CHANGE_CHARS = 120;
+const OUTLINE_PROVIDER_TIMEOUT_MS = 2000;
+const OUTLINE_PROVIDER_RETRY_BACKOFF_MS = 30_000;
+const MAX_OUTLINE_CACHE_ENTRIES = 16;
+
+interface DocumentSymbolsCacheEntry {
+	version: number;
+	symbols: readonly OutlineSymbolLike[];
+	retryAfter: number;
+	inFlight?: Promise<void>;
+}
+
+type DocumentSymbolLoader = (
+	uri: vscode.Uri,
+) => Thenable<vscode.DocumentSymbol[] | vscode.SymbolInformation[] | undefined>;
+
+export interface ApiClientOptions {
+	documentSymbolLoader?: DocumentSymbolLoader;
+	outlineProviderTimeoutMs?: number;
+	outlineProviderRetryBackoffMs?: number;
+}
 
 // Per-chunk retrieval truncation. Original Sweep used 200 lines against a
 // 150/150 broad window (≈2/3 of the broad-context budget); we keep the same
@@ -70,14 +102,27 @@ function retrievalChunkLines(): number {
 export function formatRecentChanges(
 	changes: RecentChange[],
 	maxChars = DEFAULT_MAX_RECENT_CHANGES_CHARS,
+	options: {
+		maxEntries?: number;
+		oldestFirst?: boolean;
+	} = {},
 ): string {
 	const budget = Math.max(0, Math.floor(maxChars));
 	if (budget === 0) return "";
 
-	let result = "";
-	for (const change of changes) {
-		if (!change.diff) continue;
+	const maxEntries =
+		options.maxEntries === undefined
+			? Number.POSITIVE_INFINITY
+			: Math.max(0, Math.floor(options.maxEntries));
+	let selectedChanges = changes
+		.filter((change) => Boolean(change.diff))
+		.slice(0, maxEntries);
+	if (options.oldestFirst) {
+		selectedChanges = selectedChanges.reverse();
+	}
 
+	let result = "";
+	for (const change of selectedChanges) {
 		const cleaned = cleanRecentChangeDiff(change.diff);
 		if (!cleaned) continue;
 
@@ -135,7 +180,14 @@ function truncateRecentChangeEntry(
 
 export class ApiClient {
 	private server: CompletionServer;
+	private readonly documentSymbolLoader: DocumentSymbolLoader;
+	private readonly outlineProviderTimeoutMs: number;
+	private readonly outlineProviderRetryBackoffMs: number;
 	private idCounter = 0;
+	private readonly documentSymbolsCache = new Map<
+		string,
+		DocumentSymbolsCacheEntry
+	>();
 	private readonly identicalPromptResults = new Map<
 		string,
 		{ completion: CompletionResult; expiresAt: number }
@@ -144,8 +196,23 @@ export class ApiClient {
 	private readonly processingEmitter = new vscode.EventEmitter<boolean>();
 	readonly onDidChangeProcessing = this.processingEmitter.event;
 
-	constructor(server: CompletionServer) {
+	constructor(server: CompletionServer, options: ApiClientOptions = {}) {
 		this.server = server;
+		this.documentSymbolLoader =
+			options.documentSymbolLoader ??
+			((uri) =>
+				vscode.commands.executeCommand<
+					vscode.DocumentSymbol[] | vscode.SymbolInformation[] | undefined
+				>("vscode.executeDocumentSymbolProvider", uri));
+		this.outlineProviderTimeoutMs = Math.max(
+			0,
+			options.outlineProviderTimeoutMs ?? OUTLINE_PROVIDER_TIMEOUT_MS,
+		);
+		this.outlineProviderRetryBackoffMs = Math.max(
+			0,
+			options.outlineProviderRetryBackoffMs ??
+				OUTLINE_PROVIDER_RETRY_BACKOFF_MS,
+		);
 	}
 
 	get isProcessing(): boolean {
@@ -165,14 +232,14 @@ export class ApiClient {
 			return null;
 		}
 
-		const requestData = await this.buildRequest(input);
+		const format = detectModelFormat(config.modelName);
+		const requestData = await this.buildRequest(input, format);
 		const parsedRequest = AutocompleteRequestSchema.safeParse(requestData);
 		if (!parsedRequest.success) {
 			logger.error("Invalid request data:", parsedRequest.error.message);
 			return null;
 		}
 
-		const format = detectModelFormat(config.modelName);
 		const rules = loadWorkspaceRules(input.document);
 		const commentPrefix = getCommentPrefix(input.document.languageId);
 		const inlineDiagnosticsMarker = config.inlineDiagnosticsMarker;
@@ -187,6 +254,9 @@ export class ApiClient {
 						inlineDiagnosticsMarker,
 						messageTransforms,
 						protocolVersion: format === "zeta2.1" ? "2.1" : "2",
+						editableTokens: config.zetaEditableTokens,
+						contextTokens: config.zetaContextTokens,
+						maxRelatedChunks: config.maxContextFiles,
 					})
 				: buildSweepPrompt(parsedRequest.data, {
 						broadBefore: config.broadBefore,
@@ -204,6 +274,9 @@ export class ApiClient {
 		logger.info(
 			`→ /v1/completions format=${format} model=${config.modelName} max_tokens=${MAX_TOKENS} prompt_chars=${prompt.prompt.length}`,
 		);
+		if (prompt.contextStats) {
+			logger.debug("Prompt context chars:", prompt.contextStats);
+		}
 		logger.trace("→ /v1/completions raw prompt:", prompt.prompt);
 		this.inFlight++;
 		if (this.inFlight === 1) this.processingEmitter.fire(true);
@@ -358,6 +431,7 @@ export class ApiClient {
 
 	private async buildRequest(
 		input: AutocompleteInput,
+		format: ModelFormat,
 	): Promise<AutocompleteRequest> {
 		const {
 			document,
@@ -370,16 +444,47 @@ export class ApiClient {
 		} = input;
 
 		const filePath = toUnixPath(document.uri.fsPath) || "untitled";
+		const isZeta = format === "zeta2" || format === "zeta2.1";
 		const recentChangesText = formatRecentChanges(
 			recentChanges,
 			config.maxRecentChangesChars,
+			isZeta
+				? {
+						maxEntries: ZETA_TRAINING_TEMPLATE_MAX_EDIT_EVENTS,
+						oldestFirst: true,
+					}
+				: {},
 		);
 		const fileChunks = this.buildFileChunks(recentBuffers);
-		const retrievalChunks = await this.buildRetrievalChunks(
-			document,
-			position,
-			filePath,
-		);
+		const zetaWindow =
+			format === "zeta2.1"
+				? selectZetaCursorWindowFromLineProvider(
+						document.lineCount,
+						position.line,
+						config.zetaEditableTokens,
+						config.zetaContextTokens,
+						(line) => document.lineAt(line).text,
+					)
+				: null;
+		const zetaContextRange = zetaWindow
+			? {
+					startLine: zetaWindow.contextStart,
+					endLine: zetaWindow.contextEnd,
+				}
+			: null;
+		const [retrievalChunks, symbolOutline] = await Promise.all([
+			config.maxContextFiles > 0
+				? this.buildRetrievalChunks(
+						document,
+						position,
+						filePath,
+						zetaContextRange,
+					)
+				: Promise.resolve([]),
+			config.outlineSymbols > 0
+				? this.buildSymbolOutline(document, position.line)
+				: Promise.resolve(""),
+		]);
 		const editorDiagnostics = this.buildEditorDiagnostics(
 			document,
 			diagnostics,
@@ -398,6 +503,7 @@ export class ApiClient {
 			multiple_suggestions: false,
 			file_chunks: fileChunks,
 			retrieval_chunks: retrievalChunks,
+			symbol_outline: symbolOutline,
 			editor_diagnostics: editorDiagnostics,
 			recent_user_actions: userActions,
 			use_bytes: true,
@@ -407,7 +513,6 @@ export class ApiClient {
 	private buildFileChunks(buffers: RecentBuffer[]): FileChunk[] {
 		return buffers
 			.filter((buffer) => !isFileTooLarge(buffer.content))
-			.slice(0, 3)
 			.map((buffer) => {
 				if (buffer.startLine !== undefined && buffer.endLine !== undefined) {
 					return {
@@ -434,10 +539,14 @@ export class ApiClient {
 		document: vscode.TextDocument,
 		position: vscode.Position,
 		currentFilePath: string,
+		currentFileContextRange: {
+			startLine: number;
+			endLine: number;
+		} | null,
 	): Promise<FileChunk[]> {
 		const [definitionChunks, usageChunks, clipboardChunks] = await Promise.all([
-			this.buildDefinitionChunks(document, position),
-			this.buildUsageChunks(document, position),
+			this.buildDefinitionChunks(document, position, currentFileContextRange),
+			this.buildUsageChunks(document, position, currentFileContextRange),
 			config.includeClipboardContext
 				? this.buildClipboardChunks()
 				: Promise.resolve([]),
@@ -450,7 +559,11 @@ export class ApiClient {
 		// retrieval chunk too — that path was unfiltered (file-wide) and
 		// duplicated the same data in a less useful position in the prompt.
 		const chunks = [...usageChunks, ...definitionChunks, ...clipboardChunks]
-			.filter((chunk) => chunk.file_path !== currentFilePath)
+			.filter(
+				(chunk) =>
+					currentFileContextRange !== null ||
+					chunk.file_path !== currentFilePath,
+			)
 			.map((chunk) => truncateRetrievalChunk(chunk, retrievalChunkLines()))
 			.filter((chunk) => chunk.content.trim().length > 0);
 
@@ -460,6 +573,119 @@ export class ApiClient {
 			config.stableRetrievalOrdering,
 			MAX_RETRIEVAL_CHUNKS,
 		);
+	}
+
+	handleDocumentSaved(document: vscode.TextDocument): void {
+		if (config.outlineSymbols <= 0) return;
+		const entry = this.getOrCreateDocumentSymbolsEntry(document);
+		if (entry) this.refreshDocumentSymbols(document, entry);
+	}
+
+	private buildSymbolOutline(
+		document: vscode.TextDocument,
+		cursorLine0: number,
+	): string {
+		const symbols = this.getDocumentSymbols(document);
+		return formatSymbolOutline(symbols, cursorLine0, config.outlineSymbols);
+	}
+
+	private getDocumentSymbols(
+		document: vscode.TextDocument,
+	): readonly OutlineSymbolLike[] {
+		const entry = this.getOrCreateDocumentSymbolsEntry(document);
+		if (!entry) return [];
+
+		// Document Symbols are optional context and must never delay a
+		// completion. Keep the last complete snapshot while the editor is
+		// dirty; otherwise a parser can replace a healthy outline with a
+		// transient partial tree in the middle of a typing burst.
+		if (!document.isDirty && entry.version !== document.version) {
+			this.refreshDocumentSymbols(document, entry);
+		}
+		return entry.symbols;
+	}
+
+	private getOrCreateDocumentSymbolsEntry(
+		document: vscode.TextDocument,
+	): DocumentSymbolsCacheEntry | undefined {
+		const key = document.uri.toString();
+		const cached = this.documentSymbolsCache.get(key);
+		if (cached) {
+			// Touch the entry so Map insertion order acts as a small LRU.
+			this.documentSymbolsCache.delete(key);
+			this.documentSymbolsCache.set(key, cached);
+			return cached;
+		}
+
+		if (this.documentSymbolsCache.size >= MAX_OUTLINE_CACHE_ENTRIES) {
+			const evictable = [...this.documentSymbolsCache].find(
+				([, entry]) => !entry.inFlight,
+			);
+			if (!evictable) {
+				// Every slot is waiting on a provider. Do not create another
+				// request and risk an unbounded pile-up behind a stuck LSP.
+				return undefined;
+			}
+			this.documentSymbolsCache.delete(evictable[0]);
+		}
+
+		const entry: DocumentSymbolsCacheEntry = {
+			version: -1,
+			symbols: [],
+			retryAfter: 0,
+		};
+		this.documentSymbolsCache.set(key, entry);
+		return entry;
+	}
+
+	private refreshDocumentSymbols(
+		document: vscode.TextDocument,
+		entry: DocumentSymbolsCacheEntry,
+	): void {
+		if (document.isDirty || entry.inFlight || Date.now() < entry.retryAfter) {
+			return;
+		}
+
+		const requestedVersion = document.version;
+		let timedOut = false;
+		let timeout: ReturnType<typeof setTimeout> | undefined;
+		const inFlight = (async (): Promise<void> => {
+			if (this.outlineProviderTimeoutMs > 0) {
+				timeout = setTimeout(() => {
+					timedOut = true;
+					entry.retryAfter = Date.now() + this.outlineProviderRetryBackoffMs;
+					logger.debug(
+						"Document Symbols provider timed out; keeping cached outline",
+						{
+							uri: document.uri.toString(),
+							timeoutMs: this.outlineProviderTimeoutMs,
+						},
+					);
+				}, this.outlineProviderTimeoutMs);
+			}
+
+			try {
+				const symbols = (await this.documentSymbolLoader(document.uri)) ?? [];
+				if (
+					timedOut ||
+					document.isDirty ||
+					document.version !== requestedVersion
+				) {
+					return;
+				}
+				entry.symbols = symbols;
+				entry.version = requestedVersion;
+				entry.retryAfter = 0;
+			} catch {
+				entry.retryAfter = Date.now() + this.outlineProviderRetryBackoffMs;
+			} finally {
+				if (timeout) clearTimeout(timeout);
+			}
+		})();
+		entry.inFlight = inFlight;
+		void inFlight.finally(() => {
+			if (entry.inFlight === inFlight) delete entry.inFlight;
+		});
 	}
 
 	private buildEditorDiagnostics(
@@ -523,6 +749,10 @@ export class ApiClient {
 	private async buildDefinitionChunks(
 		document: vscode.TextDocument,
 		position: vscode.Position,
+		currentFileContextRange: {
+			startLine: number;
+			endLine: number;
+		} | null,
 	): Promise<FileChunk[]> {
 		try {
 			const results =
@@ -531,7 +761,14 @@ export class ApiClient {
 				>("vscode.executeDefinitionProvider", document.uri, position)) ?? [];
 			const locations = results
 				.map((result) => this.normalizeLocation(result))
-				.filter((location): location is vscode.Location => location !== null);
+				.filter((location): location is vscode.Location => location !== null)
+				.filter((location) =>
+					this.isUsefulRetrievalLocation(
+						location,
+						document.uri,
+						currentFileContextRange,
+					),
+				);
 			return this.buildLocationChunks(locations, MAX_DEFINITION_CHUNKS);
 		} catch {
 			return [];
@@ -541,6 +778,10 @@ export class ApiClient {
 	private async buildUsageChunks(
 		document: vscode.TextDocument,
 		position: vscode.Position,
+		currentFileContextRange: {
+			startLine: number;
+			endLine: number;
+		} | null,
 	): Promise<FileChunk[]> {
 		try {
 			const results =
@@ -549,7 +790,16 @@ export class ApiClient {
 					document.uri,
 					position,
 				)) ?? [];
-			return this.buildLocationChunks(results, MAX_USAGE_CHUNKS);
+			return this.buildLocationChunks(
+				results.filter((location) =>
+					this.isUsefulRetrievalLocation(
+						location,
+						document.uri,
+						currentFileContextRange,
+					),
+				),
+				MAX_USAGE_CHUNKS,
+			);
 		} catch {
 			return [];
 		}
@@ -565,6 +815,25 @@ export class ApiClient {
 			return new vscode.Location(location.targetUri, location.targetRange);
 		}
 		return null;
+	}
+
+	private isUsefulRetrievalLocation(
+		location: vscode.Location,
+		currentDocumentUri: vscode.Uri,
+		currentFileContextRange: {
+			startLine: number;
+			endLine: number;
+		} | null,
+	): boolean {
+		if (location.uri.toString() !== currentDocumentUri.toString()) return true;
+		if (currentFileContextRange === null) return false;
+
+		const locationStart = location.range.start.line;
+		const locationEnd = location.range.end.line + 1;
+		return (
+			locationEnd <= currentFileContextRange.startLine ||
+			locationStart >= currentFileContextRange.endLine
+		);
 	}
 
 	private async buildLocationChunks(

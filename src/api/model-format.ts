@@ -16,11 +16,9 @@ export interface PromptLine {
 	content: string;
 }
 
-// One focused region inside the prompt. For zeta2.1, each region's start
-// and end become consecutive numbered boundaries in a single editable
-// excerpt. A response can rewrite the text between any two boundaries,
-// including across focused regions. For sweep / zeta2.0 we always have
-// exactly one region.
+// One editable region inside the prompt. Zeta2.1 subdivides its single
+// contiguous region with markerBoundaryLines; sweep / zeta2.0 use one region
+// without numbered boundaries.
 export interface EditRegion {
 	// 0-indexed half-open line range in the document.
 	startLine: number;
@@ -30,11 +28,25 @@ export interface EditRegion {
 	isPrimary: boolean;
 }
 
+export interface PromptContextStats {
+	activeFileSuffix?: number;
+	rules?: number;
+	relatedFiles?: number;
+	outline?: number;
+	editHistory?: number;
+	diagnostics?: number;
+	activeFilePrefixAndEditable?: number;
+}
+
 // Common output of every prompt builder. The response parser uses
 // windowStartLine / windowEndLine + lines + cursorLineByteOffsets to map
 // the model's text output back to a byte-offset edit on the user's buffer.
 export interface ModelPrompt {
 	prompt: string;
+	// Cheap observability for prompt composition. Values are UTF-16
+	// character counts, not tokenizer counts, so collecting them does not
+	// add model/tokenizer work to the VS Code extension host.
+	contextStats?: PromptContextStats;
 	// Text the model is expected to "continue" from. Sweep uses this to seed
 	// the updated/{path} section; Zeta2's FIM layout has nothing to prefill,
 	// so this is "" for that format.
@@ -43,14 +55,18 @@ export interface ModelPrompt {
 	stopTokens: string[];
 	// Line range (0-indexed half-open) the response replaces. For sweep
 	// this is the full original/current/updated window; for zeta2 / 2.1
-	// it's the *primary* editable region. Multi-region builders also
-	// populate `regions[]` with the full set including secondary spans.
+	// it's the editable region around the cursor.
 	windowStartLine: number;
 	windowEndLine: number;
-	// Focused regions, ordered by start line. Always non-empty; the region
-	// marked primary carries the cursor. zeta2.1 may have multiple and
-	// flattens their start/end lines into numbered marker boundaries.
+	// Always non-empty. Retained as a common representation for the legacy
+	// Sweep/Zeta2 response paths; Zeta2.1 now has one contiguous region.
 	regions: EditRegion[];
+	// Absolute document line boundaries corresponding to <|marker_1|>,
+	// <|marker_2|>, ... in a Zeta2.1 prompt. Interior boundaries divide the
+	// editable excerpt into Zed V0318-style blocks. At a newline-terminated
+	// EOF the last entry is the logical EOF line, before splitLines' phantom
+	// trailing empty element.
+	markerBoundaryLines?: number[];
 	// Full file lines + byte offsets. The response parser indexes into these
 	// to produce a UTF-8 byte-offset edit. These reflect the *undecorated*
 	// document; if injectInlineDiagnostics added FIXME suffixes, those live

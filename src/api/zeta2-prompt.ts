@@ -8,10 +8,9 @@
 // markers from a small table.
 //
 // Prompt layout (single completion text fed to /v1/completions). Pseudo-
-// files inside the prefix block are ordered for prefix-cache friendliness:
-// rules first (session-stable), then volatile context, with diagnostics
-// last so the model sees them adjacent to the cursor file's editable
-// region.
+// files inside the prefix block are ordered with rules first, then volatile
+// context, with diagnostics last so the model sees them adjacent to the
+// cursor file's editable region.
 //
 //   <[fim-suffix]>{code after editable region}\n
 //
@@ -20,6 +19,11 @@
 //
 //   <filename>{path}                          (recent buffer pseudo-files)
 //   {file body}
+//
+//   <filename>context/outline                 active + nearby LSP symbols
+//   active_symbol: Class::method
+//   nearby_functions:
+//   ...
 //
 //   <filename>edit_history                    (omitted if no recent changes)
 //   --- a/{path}
@@ -38,13 +42,24 @@
 //
 // 2.0 model emits the replacement editable region terminated by
 // ">>>>>>> UPDATED". A literal "NO_EDITS" output means no change.
-// 2.1 numbered markers are boundaries inside one editable excerpt. The
-// model returns one span from any marker N to a later marker M:
+// 2.1 numbered markers are Zed V0318 boundaries inside one contiguous
+// editable excerpt. The model returns one span from any marker N to a later M:
 // "<|marker_N|>\n{replacement}\n<|marker_M|>". The response parser maps
 // those two boundary numbers back to document offsets.
 
 import type { MessageTransform } from "~/core/config.ts";
-import type { EditRegion, ModelPrompt } from "./model-format.ts";
+import {
+	DEFAULT_MAX_CONTEXT_FILES,
+	DEFAULT_ZETA_CONTEXT_TOKENS,
+	DEFAULT_ZETA_EDITABLE_TOKENS,
+	ZETA_ESTIMATED_BYTES_PER_TOKEN,
+} from "~/core/constants.ts";
+import { utf8ByteOffsetToUtf16Offset } from "~/utils/text.ts";
+import type {
+	EditRegion,
+	ModelPrompt,
+	PromptContextStats,
+} from "./model-format.ts";
 import type {
 	AutocompleteRequest,
 	EditorDiagnostic,
@@ -99,21 +114,14 @@ export function getZeta2RegionMarkers(
 	};
 }
 
-// Zed's cloud Zeta2 endpoint targets ±350 / ±150 token budgets for the
-// editable / context regions. We approximate with line counts since we
-// don't carry a tokenizer; the model is robust enough that ±15 lines
-// around the cursor lands within the trained budget.
-const EDITABLE_LINES_BEFORE = 15;
-const EDITABLE_LINES_AFTER = 15;
-
 const MAX_DIAGNOSTICS = 15;
 
-// Multi-region tunables (zeta2.1 only). A "diagnostic region" is a small
-// ±halo window around an LSP diagnostic that sits OUTSIDE the primary
-// cursor window — included so the model can fix several issues in one
-// round-trip. Cap the total region count so the prompt doesn't sprawl.
-const DIAG_REGION_HALO_LINES = 2;
-const MAX_REGIONS = 3; // 1 cursor + up to 2 diagnostic regions
+// Zeta 2.1's V0318 marker-placement parameters. A boundary is considered
+// after at least six lines, forced after sixteen lines, and may move forward
+// by up to five lines to avoid starting a block on a structural tail.
+const V0318_MIN_BLOCK_LINES = 6;
+const V0318_MAX_BLOCK_LINES = 16;
+const MAX_NUDGE_LINES = 5;
 
 export interface Zeta2PromptOptions {
 	diagRadius: number;
@@ -135,6 +143,14 @@ export interface Zeta2PromptOptions {
 	// numbered boundary markers and expects the model to return the two
 	// boundaries surrounding its rewritten span.
 	protocolVersion: Zeta2Protocol;
+	// Provider-profile budgets estimated as UTF-8 bytes / 3. Excerpts grow
+	// symmetrically from the cursor and remain aligned to whole lines, so
+	// no tokenizer is needed in the extension host.
+	editableTokens: number;
+	contextTokens: number;
+	// Total number of related excerpts. LSP retrieval is preferred over
+	// visible/recent buffers so high-signal definitions survive the cap.
+	maxRelatedChunks: number;
 }
 
 const DEFAULT_OPTIONS: Zeta2PromptOptions = {
@@ -145,7 +161,165 @@ const DEFAULT_OPTIONS: Zeta2PromptOptions = {
 	inlineDiagnosticsMarker: "BUG: LSP error here",
 	messageTransforms: [],
 	protocolVersion: "2",
+	editableTokens: DEFAULT_ZETA_EDITABLE_TOKENS,
+	contextTokens: DEFAULT_ZETA_CONTEXT_TOKENS,
+	maxRelatedChunks: DEFAULT_MAX_CONTEXT_FILES,
 };
+
+export interface ZetaCursorWindow {
+	editableStart: number;
+	editableEnd: number;
+	contextStart: number;
+	contextEnd: number;
+}
+
+/**
+ * Select a contiguous, line-aligned cursor excerpt using Zeta's approximate
+ * token budgets. Estimating one token per three UTF-8 bytes matches Zed's
+ * cheap cursor-excerpt heuristic without putting a tokenizer on VS Code's
+ * extension-host hot path.
+ */
+export function selectZetaCursorWindow(
+	lines: string[],
+	cursorLine: number,
+	editableTokens: number,
+	contextTokens: number,
+): ZetaCursorWindow {
+	return selectZetaCursorWindowFromLineProvider(
+		lines.length,
+		cursorLine,
+		editableTokens,
+		contextTokens,
+		(line) => lines[line] ?? "",
+	);
+}
+
+export function selectZetaCursorWindowFromLineProvider(
+	lineCount: number,
+	cursorLine: number,
+	editableTokens: number,
+	contextTokens: number,
+	getLine: (line: number) => string,
+): ZetaCursorWindow {
+	if (lineCount === 0) {
+		return {
+			editableStart: 0,
+			editableEnd: 0,
+			contextStart: 0,
+			contextEnd: 0,
+		};
+	}
+
+	const boundedCursorLine = Math.min(Math.max(0, cursorLine), lineCount - 1);
+	const editableBudgetBytes =
+		Math.max(1, Math.floor(editableTokens)) * ZETA_ESTIMATED_BYTES_PER_TOKEN;
+	const cursorLineBytes = linePromptByteLength(
+		lineCount,
+		getLine,
+		boundedCursorLine,
+	);
+	const editable = expandLineAlignedWindow(
+		lineCount,
+		getLine,
+		boundedCursorLine,
+		boundedCursorLine + 1,
+		editableBudgetBytes,
+		cursorLineBytes,
+	);
+
+	const contextBudgetBytes =
+		Math.max(0, Math.floor(contextTokens)) * ZETA_ESTIMATED_BYTES_PER_TOKEN;
+	const context = expandLineAlignedWindow(
+		lineCount,
+		getLine,
+		editable.start,
+		editable.end,
+		contextBudgetBytes,
+		0,
+	);
+
+	return {
+		editableStart: editable.start,
+		editableEnd: editable.end,
+		contextStart: context.start,
+		contextEnd: context.end,
+	};
+}
+
+function expandLineAlignedWindow(
+	lineCount: number,
+	getLine: (line: number) => string,
+	initialStart: number,
+	initialEnd: number,
+	budgetBytes: number,
+	initialBytes: number,
+): { start: number; end: number } {
+	let start = initialStart;
+	let end = initialEnd;
+	let usedBytes = initialBytes;
+	let beforeOpen = start > 0;
+	let afterOpen = end < lineCount;
+	let preferBefore = true;
+
+	while (beforeOpen || afterOpen) {
+		let expanded = false;
+		const sides = preferBefore
+			? (["before", "after"] as const)
+			: (["after", "before"] as const);
+
+		for (const side of sides) {
+			if (side === "before") {
+				if (!beforeOpen) continue;
+				const candidate = start - 1;
+				const candidateBytes = linePromptByteLength(
+					lineCount,
+					getLine,
+					candidate,
+				);
+				if (usedBytes + candidateBytes <= budgetBytes) {
+					start = candidate;
+					usedBytes += candidateBytes;
+					beforeOpen = start > 0;
+					preferBefore = false;
+					expanded = true;
+					break;
+				}
+				beforeOpen = false;
+				continue;
+			}
+
+			if (!afterOpen) continue;
+			const candidate = end;
+			const candidateBytes = linePromptByteLength(
+				lineCount,
+				getLine,
+				candidate,
+			);
+			if (usedBytes + candidateBytes <= budgetBytes) {
+				end = candidate + 1;
+				usedBytes += candidateBytes;
+				afterOpen = end < lineCount;
+				preferBefore = true;
+				expanded = true;
+				break;
+			}
+			afterOpen = false;
+		}
+
+		if (!expanded && !beforeOpen && !afterOpen) break;
+	}
+
+	return { start, end };
+}
+
+function linePromptByteLength(
+	lineCount: number,
+	getLine: (line: number) => string,
+	line: number,
+): number {
+	const newlineBytes = line < lineCount - 1 ? 1 : 0;
+	return Buffer.byteLength(getLine(line), "utf8") + newlineBytes;
+}
 
 export function buildZeta2Prompt(
 	req: AutocompleteRequest,
@@ -160,11 +334,19 @@ export function buildZeta2Prompt(
 		req.cursor_position,
 	);
 
-	const editableStart = Math.max(0, cursorLine - EDITABLE_LINES_BEFORE);
-	const editableEnd = Math.min(
-		lines.length,
-		cursorLine + EDITABLE_LINES_AFTER + 1,
+	const selectedWindow = selectZetaCursorWindow(
+		lines,
+		cursorLine,
+		opts.editableTokens,
+		opts.contextTokens,
 	);
+	const editableStart = selectedWindow.editableStart;
+	const editableEnd = selectedWindow.editableEnd;
+	const contextStart =
+		opts.protocolVersion === "2.1" ? selectedWindow.contextStart : 0;
+	const contextEnd =
+		opts.protocolVersion === "2.1" ? selectedWindow.contextEnd : lines.length;
+	const promptDiagnostics = req.editor_diagnostics;
 
 	// `lines` reflects the actual document and is preserved on prompt.lines
 	// for response mapping. `promptLines` is the rendered view that may
@@ -172,43 +354,30 @@ export function buildZeta2Prompt(
 	// injectedFixmeMessages before line-diffing.
 	const { promptLines, injectedFixmeMessages } = decorateLinesWithFixmes(
 		lines,
-		req.editor_diagnostics,
+		promptDiagnostics,
 		cursorLine,
 		opts,
 	);
 
-	// Compute editable regions. zeta2.1 supports multi-region edits; we
-	// always include the primary cursor region, plus up to MAX_REGIONS-1
-	// non-overlapping windows around nearby diagnostics so the model can
-	// fix several issues in one response. zeta2.0 / sweep ignore the
-	// extras (multi-region isn't part of those formats).
-	const regions = computeEditRegions(
-		cursorLine,
-		lines.length,
-		editableStart,
-		editableEnd,
-		req.editor_diagnostics,
-		opts,
-	);
-	const primary = regions.find((r) => r.isPrimary) ?? regions[0];
-	if (!primary) {
-		throw new Error("zeta2 prompt: no primary editable region computed");
-	}
+	// Zeta 2.1's "multi-region" format subdivides one contiguous cursor
+	// excerpt with numbered boundaries. Diagnostics remain related context;
+	// they do not create discontiguous editable windows.
+	const primary: EditRegion = {
+		startLine: editableStart,
+		endLine: editableEnd,
+		isPrimary: true,
+	};
+	const regions = [primary];
 
 	let body = "";
+	const contextStats: PromptContextStats = {};
 
-	// Suffix section: <[fim-suffix]>{code after the LAST editable region}\n
-	// In single-region prompts this is just the code after the cursor
-	// window; in multi-region prompts it's the code after the highest
-	// region. Code BETWEEN regions stays in the cursor file body so each
-	// region's surrounding context is preserved.
-	const lastRegion = regions[regions.length - 1];
-	if (!lastRegion) {
-		throw new Error("zeta2 prompt: regions must be non-empty");
-	}
-	const suffixLines = promptLines.slice(lastRegion.endLine);
+	// The V0318 suffix contains only the trailing part of the selected
+	// cursor context. Legacy Zeta2 keeps its previous full-file behaviour.
+	const suffixLines = promptLines.slice(primary.endLine, contextEnd);
 	body += FIM_SUFFIX;
 	const suffixText = suffixLines.join("\n");
+	contextStats.activeFileSuffix = suffixText.length;
 	body += suffixText;
 	body += suffixText.endsWith("\n") || suffixText === "" ? "" : "\n";
 	if (suffixText === "") body += "\n";
@@ -222,73 +391,101 @@ export function buildZeta2Prompt(
 	// so this maximises prefix-cache reuse across requests. NESweep
 	// extension — cursortab's zeta2 has no equivalent slot.
 	if (opts.rules !== "") {
+		contextStats.rules = opts.rules.length;
 		body += `${FILE_MARKER}context/rules\n${opts.rules}`;
 		if (!opts.rules.endsWith("\n")) body += "\n";
 		body += "\n";
 	}
 
-	// Recent buffers as pseudo-files. Cursortab fills this slot with
-	// LSP-related files; we use file_chunks (visible editors + recent
-	// buffers) as the closest proxy.
-	body += formatRecentFilesPseudoFiles(req.file_chunks);
+	// Zed fills this slot primarily with LSP-related excerpts. Prefer
+	// definitions/usages/clipboard retrieval, omit current-file snippets
+	// already visible in the local cursor window, then use visible/recent
+	// buffers to fill the remaining fixed-size budget.
+	const relatedChunks = selectZetaRelatedChunks(
+		req.retrieval_chunks,
+		req.file_chunks,
+		req.file_path,
+		contextStart,
+		contextEnd,
+		opts.maxRelatedChunks,
+	);
+	const relatedFilesText = formatRecentFilesPseudoFiles(relatedChunks);
+	if (relatedFilesText !== "") {
+		contextStats.relatedFiles = relatedFilesText.length;
+		body += relatedFilesText;
+	}
 
-	// Edit history pseudo-file. The upstream emits a git-style unified
-	// diff per event; our recent_changes string is already pre-formatted
-	// per file with `File: {path}:` headers (see formatRecentChanges in
-	// client.ts), so we emit it verbatim — the model is tolerant enough
-	// to read it.
+	// Compact active-file structure from Document Symbols. It follows
+	// related code but precedes the high-churn diagnostics/history blocks,
+	// preserving a useful cache-stable prefix while restoring structural
+	// context lost by the intentionally small active-file excerpt.
+	const symbolOutline = req.symbol_outline?.trim() ?? "";
+	if (symbolOutline !== "") {
+		contextStats.outline = symbolOutline.length;
+		body += `${FILE_MARKER}context/outline\n${symbolOutline}\n\n`;
+	}
+
+	// Preserve Zed's training-time edit-history-first order. In particular,
+	// keep the suffix-first FIM layout above even though it limits prefix
+	// cache reuse when the cursor moves.
 	const editHistory = req.recent_changes.trim();
-	if (editHistory !== "") {
-		body += `${FILE_MARKER}edit_history\n${editHistory}\n\n`;
-	}
+	const editHistoryText =
+		editHistory === "" ? "" : `${FILE_MARKER}edit_history\n${editHistory}\n\n`;
+	const diagnosticsText = opts.injectInlineDiagnostics
+		? ""
+		: formatDiagnosticsPseudoFile(
+				promptDiagnostics,
+				cursorLine + 1,
+				opts.diagRadius,
+				opts.commentPrefix,
+				lines,
+				lineOffsets,
+				opts.messageTransforms,
+			);
 
-	// Diagnostics last among context pseudo-files — sits immediately
-	// before the cursor file with its CURRENT/UPDATED markers, so the
-	// model attends to the latest LSP errors when generating the edit.
-	// Skipped when inline injection is on: the per-line `BUG:` comments
-	// in the cursor file already surface the same diagnostics, so the
-	// structured pseudo-file would just duplicate the data.
-	if (!opts.injectInlineDiagnostics) {
-		body += formatDiagnosticsPseudoFile(
-			req.editor_diagnostics,
-			cursorLine + 1,
-			opts.diagRadius,
-			opts.commentPrefix,
-			lines,
-			lineOffsets,
-			opts.messageTransforms,
-		);
+	if (editHistoryText !== "") {
+		contextStats.editHistory = editHistory.length;
 	}
+	if (diagnosticsText !== "") {
+		contextStats.diagnostics = diagnosticsText.length;
+	}
+	body += editHistoryText;
+	body += diagnosticsText;
 
 	// Cursor file section
+	const cursorFileStart = body.length;
 	body += `${FILE_MARKER}${req.file_path}\n`;
 
-	// Render leading context + every editable region in order. For 2.1,
-	// each marker is a boundary in one continuous excerpt: region starts
-	// and ends contribute consecutive numbered boundaries, while code
-	// between focused regions remains editable context between those
-	// boundaries. 2.0 keeps its single CURRENT/======= scaffold.
-	const stopTokens = appendCursorFileBodyAndMarkers(
+	// Render the selected leading context and the contiguous editable
+	// excerpt. V0318 marker placement is deterministic and independent of
+	// diagnostics. Zeta2.0 keeps its single CURRENT/======= scaffold.
+	const markerResult = appendCursorFileBodyAndMarkers(
 		(s) => {
 			body += s;
 		},
 		promptLines,
-		regions,
+		primary,
+		contextStart,
 		cursorLine,
 		cursorCol,
 		opts.protocolVersion,
 	);
 	body += FIM_MIDDLE;
+	contextStats.activeFilePrefixAndEditable = body.length - cursorFileStart;
 
 	return {
 		prompt: body,
+		contextStats,
 		// FIM has no prefill — the model continues directly after <[fim-middle]>.
 		prefill: "",
 		format: opts.protocolVersion === "2.1" ? "zeta2.1" : "zeta2",
-		stopTokens,
+		stopTokens: markerResult.stopTokens,
 		windowStartLine: primary.startLine,
 		windowEndLine: primary.endLine,
 		regions,
+		...(markerResult.markerBoundaryLines
+			? { markerBoundaryLines: markerResult.markerBoundaryLines }
+			: {}),
 		lines: lines.map((content, i) => ({
 			startByte: lineOffsets[i] ?? 0,
 			content,
@@ -304,25 +501,24 @@ export function buildZeta2Prompt(
 	};
 }
 
-// Emit every region with numbered boundaries and unchanged context between
-// them. In 2.1 the markers are not independent open/close pairs: a model
-// response may start at any marker and end at any later marker. Returns the
-// model's EOS token for 2.1 and the fixed `>>>>>>> UPDATED` token for 2.0.
+interface MarkerRenderResult {
+	stopTokens: string[];
+	markerBoundaryLines?: number[];
+}
+
+// Emit one contiguous editable excerpt. In 2.1, numbered markers subdivide
+// that excerpt using Zed's V0318 boundary algorithm; a response may start at
+// any marker and end at any later marker.
 function appendCursorFileBodyAndMarkers(
 	push: (s: string) => void,
 	promptLines: string[],
-	regions: EditRegion[],
+	primary: EditRegion,
+	contextStartLine: number,
 	cursorLine: number,
 	cursorCol: number,
 	protocolVersion: Zeta2Protocol,
-): string[] {
+): MarkerRenderResult {
 	if (protocolVersion === "2") {
-		// 2.0 has no multi-region support — the model only knows about
-		// a single CURRENT/=======​ pair. Use the primary region only.
-		const primary = regions.find((r) => r.isPrimary) ?? regions[0];
-		if (!primary) {
-			throw new Error("zeta2 prompt: regions must be non-empty");
-		}
 		const beforeLines = promptLines.slice(0, primary.startLine);
 		const editLines = promptLines.slice(primary.startLine, primary.endLine);
 		const markers = getZeta2RegionMarkers("2");
@@ -336,97 +532,224 @@ function appendCursorFileBodyAndMarkers(
 		push(editableText);
 		if (!editableText.endsWith("\n")) push("\n");
 		push(markers.closeRegion);
-		return markers.stopTokens;
+		return { stopTokens: markers.stopTokens };
 	}
 
-	// 2.1: emit monotonically numbered boundaries throughout one editable
-	// excerpt. A focused region contributes two boundaries; the unchanged
-	// lines between focused regions sit between the previous end boundary
-	// and the next start boundary.
-	let prevEnd = 0;
-	for (let i = 0; i < regions.length; i++) {
-		const r = regions[i];
-		if (!r) continue;
-		const openNum = i * 2 + 1;
-		const closeNum = i * 2 + 2;
-		// Lines between the previous region's end and this region's start.
-		if (r.startLine > prevEnd) {
-			push(`${promptLines.slice(prevEnd, r.startLine).join("\n")}\n`);
-		}
-		push(`<|marker_${openNum}|>\n`);
-		const regionLines = promptLines.slice(r.startLine, r.endLine);
-		const text = r.isPrimary
-			? formatEditableWithCursor(
-					regionLines,
-					cursorLine - r.startLine,
-					cursorCol,
-				)
-			: regionLines.join("\n");
-		push(text);
-		if (!text.endsWith("\n")) push("\n");
-		push(`<|marker_${closeNum}|>\n`);
-		prevEnd = r.endLine;
+	const leadingContext = promptLines.slice(contextStartLine, primary.startLine);
+	if (leadingContext.length > 0) {
+		push(`${leadingContext.join("\n")}\n`);
 	}
+
+	const editableText = textForLineRange(
+		promptLines,
+		primary.startLine,
+		primary.endLine,
+	);
+	const cursorOffsetInEditable = relativeCursorByte(
+		promptLines,
+		primary.startLine,
+		cursorLine,
+		cursorCol,
+	);
+	const rendered = renderV0318Editable(
+		editableText,
+		cursorOffsetInEditable,
+		primary.startLine,
+	);
+	push(rendered.text);
+	if (!rendered.text.endsWith("\n")) push("\n");
+
 	// Never use a numbered boundary as a server stop token: a valid output
 	// can begin with marker_2 (or any later boundary), and stopping on a
 	// marker would either erase the closing boundary or terminate before
 	// the replacement is generated. The model's native EOS is unambiguous.
-	return ZETA2_1_STOP_TOKENS;
+	return {
+		stopTokens: ZETA2_1_STOP_TOKENS,
+		markerBoundaryLines: rendered.markerBoundaryLines,
+	};
 }
 
-// Compute the editable regions for a request. Always includes the
-// primary cursor region (±EDITABLE_LINES_BEFORE/AFTER lines around
-// cursor). For zeta2.1, additionally folds in up to MAX_REGIONS-1
-// non-overlapping windows centred on diagnostics that fall outside the
-// cursor region — closest-to-cursor first. zeta2.0 returns just the
-// primary (multi-region isn't part of that format).
-function computeEditRegions(
-	cursorLine: number,
-	lineCount: number,
-	editableStart: number,
-	editableEnd: number,
-	diagnostics: EditorDiagnostic[],
-	opts: Zeta2PromptOptions,
-): EditRegion[] {
-	const primary: EditRegion = {
-		startLine: editableStart,
-		endLine: editableEnd,
-		isPrimary: true,
-	};
-	if (opts.protocolVersion !== "2.1") return [primary];
+interface V0318LineInfo {
+	startByte: number;
+	isBlank: boolean;
+	isGoodStart: boolean;
+}
 
-	const cursorLine1 = cursorLine + 1;
-	// Order diagnostics by distance from cursor — closest get a region
-	// first, capacity-permitting.
-	const candidates = diagnostics
-		.filter(
-			(d) =>
-				opts.diagRadius === 0 ||
-				Math.abs(d.line - cursorLine1) <= opts.diagRadius,
-		)
-		.filter((d) => d.line - 1 < editableStart || d.line - 1 >= editableEnd)
-		.sort(
-			(a, b) => Math.abs(a.line - cursorLine1) - Math.abs(b.line - cursorLine1),
-		);
+interface RenderedV0318Editable {
+	text: string;
+	markerBoundaryLines: number[];
+}
 
-	const regions: EditRegion[] = [primary];
-	for (const d of candidates) {
-		if (regions.length >= MAX_REGIONS) break;
-		const dLine = d.line - 1;
-		const start = Math.max(0, dLine - DIAG_REGION_HALO_LINES);
-		const end = Math.min(lineCount, dLine + DIAG_REGION_HALO_LINES + 1);
-		// Skip if it would overlap any region we've already accepted;
-		// overlapping focus windows would produce non-monotonic boundaries.
-		const overlaps = regions.some(
-			(r) => start < r.endLine && end > r.startLine,
-		);
-		if (overlaps) continue;
-		regions.push({ startLine: start, endLine: end, isPrimary: false });
+function renderV0318Editable(
+	editableText: string,
+	cursorOffsetInEditable: number,
+	editableStartLine: number,
+): RenderedV0318Editable {
+	const markerOffsets = computeV0318MarkerOffsets(editableText);
+	const lineInfo = collectV0318LineInfo(editableText);
+	const editableByteLength = Buffer.byteLength(editableText, "utf8");
+	const boundedCursorOffset = Math.min(
+		Math.max(0, cursorOffsetInEditable),
+		editableByteLength,
+	);
+	const lineByStartByte = new Map(
+		lineInfo.map((line, index) => [line.startByte, index]),
+	);
+	const markerBoundaryLines = markerOffsets.map((offset) => {
+		if (offset === editableByteLength) {
+			return editableStartLine + lineInfo.length;
+		}
+		return editableStartLine + (lineByStartByte.get(offset) ?? 0);
+	});
+
+	let text = "";
+	let cursorPlaced = false;
+	for (let i = 0; i < markerOffsets.length; i++) {
+		const offset = markerOffsets[i];
+		if (offset === undefined) continue;
+		if (text !== "" && !text.endsWith("\n")) text += "\n";
+		text += `<|marker_${i + 1}|>`;
+
+		const nextOffset = markerOffsets[i + 1];
+		if (nextOffset === undefined) continue;
+		text += "\n";
+		const startUtf16 = utf8ByteOffsetToUtf16Offset(editableText, offset);
+		const endUtf16 = utf8ByteOffsetToUtf16Offset(editableText, nextOffset);
+		const block = editableText.slice(startUtf16, endUtf16);
+		if (
+			!cursorPlaced &&
+			boundedCursorOffset >= offset &&
+			boundedCursorOffset <= nextOffset
+		) {
+			cursorPlaced = true;
+			const cursorUtf16 = utf8ByteOffsetToUtf16Offset(
+				block,
+				boundedCursorOffset - offset,
+			);
+			text +=
+				block.slice(0, cursorUtf16) +
+				ZETA2_CURSOR_MARKER +
+				block.slice(cursorUtf16);
+		} else {
+			text += block;
+		}
 	}
 
-	// Emit order is by start line (open markers must be ascending).
-	regions.sort((a, b) => a.startLine - b.startLine);
-	return regions;
+	return { text, markerBoundaryLines };
+}
+
+function computeV0318MarkerOffsets(editableText: string): number[] {
+	if (editableText === "") return [0, 0];
+
+	const lines = collectV0318LineInfo(editableText);
+	const offsets = [0];
+	let lastBoundaryLine = 0;
+	let i = 0;
+
+	while (i < lines.length) {
+		const line = lines[i];
+		if (!line) break;
+		const gap = i - lastBoundaryLine;
+
+		if (
+			gap >= V0318_MIN_BLOCK_LINES &&
+			!line.isBlank &&
+			i > 0 &&
+			lines[i - 1]?.isBlank
+		) {
+			const target = line.isGoodStart
+				? i
+				: (skipToGoodV0318Start(lines, i) ?? i);
+			const targetLine = lines[target];
+			if (
+				targetLine &&
+				lines.length - target >= V0318_MIN_BLOCK_LINES &&
+				targetLine.startByte > (offsets.at(-1) ?? 0)
+			) {
+				offsets.push(targetLine.startByte);
+				lastBoundaryLine = target;
+				i = target + 1;
+				continue;
+			}
+		}
+
+		if (gap >= V0318_MAX_BLOCK_LINES) {
+			const target = skipToGoodV0318Start(lines, i) ?? i;
+			const targetLine = lines[target];
+			if (targetLine && targetLine.startByte > (offsets.at(-1) ?? 0)) {
+				offsets.push(targetLine.startByte);
+				lastBoundaryLine = target;
+				i = target + 1;
+				continue;
+			}
+		}
+
+		i++;
+	}
+
+	const end = Buffer.byteLength(editableText, "utf8");
+	if ((offsets.at(-1) ?? 0) !== end) offsets.push(end);
+	return offsets;
+}
+
+function collectV0318LineInfo(text: string): V0318LineInfo[] {
+	if (text === "") return [];
+	const lines: V0318LineInfo[] = [];
+	let startByte = 0;
+	for (const line of text.split("\n")) {
+		const trimmed = line.trim();
+		const isBlank = trimmed === "";
+		lines.push({
+			startByte,
+			isBlank,
+			isGoodStart: !isBlank && !isStructuralTail(trimmed),
+		});
+		startByte += Buffer.byteLength(line, "utf8") + 1;
+	}
+	if (text.endsWith("\n") && lines.length > 1) lines.pop();
+	return lines;
+}
+
+function skipToGoodV0318Start(
+	lines: V0318LineInfo[],
+	from: number,
+): number | undefined {
+	const end = Math.min(lines.length, from + MAX_NUDGE_LINES);
+	for (let i = from; i < end; i++) {
+		if (lines[i]?.isGoodStart) return i;
+	}
+	return undefined;
+}
+
+function isStructuralTail(trimmedLine: string): boolean {
+	if (/^[}\])]/.test(trimmedLine)) return true;
+	const withoutSemicolon = trimmedLine.replace(/;$/, "");
+	return ["break", "continue", "return", "throw", "end"].includes(
+		withoutSemicolon,
+	);
+}
+
+function textForLineRange(
+	lines: string[],
+	startLine: number,
+	endLine: number,
+): string {
+	let text = lines.slice(startLine, endLine).join("\n");
+	if (endLine < lines.length && !text.endsWith("\n")) text += "\n";
+	return text;
+}
+
+function relativeCursorByte(
+	lines: string[],
+	startLine: number,
+	cursorLine: number,
+	cursorCol: number,
+): number {
+	let offset = 0;
+	for (let i = startLine; i < cursorLine; i++) {
+		offset += Buffer.byteLength(lines[i] ?? "", "utf8") + 1;
+	}
+	return offset + cursorCol;
 }
 
 function decorateLinesWithFixmes(
@@ -503,6 +826,77 @@ function formatRecentFilesPseudoFiles(chunks: FileChunk[]): string {
 		out += "\n";
 	}
 	return out;
+}
+
+function selectZetaRelatedChunks(
+	retrievalChunks: FileChunk[],
+	recentChunks: FileChunk[],
+	currentFilePath: string,
+	contextStartLine0: number,
+	contextEndLine0: number,
+	maxChunks: number,
+): FileChunk[] {
+	const limit = Math.max(0, Math.floor(maxChunks));
+	if (limit === 0) return [];
+
+	const isUsable = (chunk: FileChunk): boolean => {
+		if (chunk.content.trim() === "") return false;
+		if (chunk.file_path !== currentFilePath) return true;
+
+		// LSP chunks use 1-indexed inclusive lines. Keep current-file
+		// definitions/references only when they add code outside the local
+		// 0-indexed half-open cursor context already rendered below.
+		const chunkStartLine0 = Math.max(0, chunk.start_line - 1);
+		const chunkEndLine0 = Math.max(chunkStartLine0, chunk.end_line);
+		return (
+			chunkEndLine0 <= contextStartLine0 || chunkStartLine0 >= contextEndLine0
+		);
+	};
+
+	const codeRetrieval = retrievalChunks.filter(
+		(chunk) => chunk.file_path !== "clipboard.txt" && isUsable(chunk),
+	);
+	const clipboard = retrievalChunks.find(
+		(chunk) => chunk.file_path === "clipboard.txt" && isUsable(chunk),
+	);
+	const usableRecentChunks = recentChunks.filter(isUsable);
+	const candidates = [...codeRetrieval, ...usableRecentChunks];
+	const capacity = Math.max(0, limit - (clipboard ? 1 : 0));
+	const selected: FileChunk[] = [];
+	const deferred: FileChunk[] = [];
+	const seenPaths = new Set<string>();
+	const seenContent = new Set<string>();
+
+	const add = (chunk: FileChunk): boolean => {
+		const key = `${chunk.file_path}\u0000${chunk.content.trim()}`;
+		if (seenContent.has(key)) return false;
+		seenContent.add(key);
+		selected.push(chunk);
+		return true;
+	};
+
+	// First pass maximises file diversity. A second excerpt from the same
+	// file is useful, but only after definitions from other files and
+	// visible/recent buffers each had a chance to contribute.
+	if (capacity > 0) {
+		for (const chunk of candidates) {
+			if (seenPaths.has(chunk.file_path)) {
+				deferred.push(chunk);
+				continue;
+			}
+			if (add(chunk)) seenPaths.add(chunk.file_path);
+			if (selected.length >= capacity) break;
+		}
+	}
+	if (selected.length < capacity) {
+		for (const chunk of deferred) {
+			add(chunk);
+			if (selected.length >= capacity) break;
+		}
+	}
+
+	if (clipboard && selected.length < limit) add(clipboard);
+	return selected.slice(0, limit);
 }
 
 function formatDiagnosticsPseudoFile(

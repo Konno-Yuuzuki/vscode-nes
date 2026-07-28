@@ -15,8 +15,12 @@ latency — is removed.
   any server you bring up (llama.cpp, vLLM, sglang, Ollama with the
   OpenAI shim).
 - **SweepAI + Zed Zeta-2 / Zeta-2.1 models.** Format auto-detected
-  from `sweep.modelName`. Zeta-2.1 returns up to three edits per
-  request (cursor area + up to two windows around nearby diagnostics).
+  from `sweep.modelName`. Zeta-2.1 uses Zed V0318-style numbered
+  boundaries across one contiguous cursor-centered editable excerpt.
+- **Targeted related-code context.** LSP definitions/usages are preferred,
+  including distant definitions in the active file; visible and recent
+  buffers fill the remaining related-context slots. A compact Document
+  Symbols outline identifies the active class/function and nearby callables.
 - **LSP-diagnostics aware.** Cursor-radius filter, cascading-error
   suppression below a root-cause line, and user-configurable regex
   rewrites on the messages (clang / clang-tidy presets included).
@@ -39,6 +43,8 @@ latency — is removed.
 | `sweep.serverUrl` | `http://localhost:8080` | `/v1/completions` base URL |
 | `sweep.modelName` | `sweepai/sweep-next-edit` | `model` field in the request body; substring-matched to pick the prompt format |
 | `sweep.completionTimeoutMs` | `10000` | Per-request timeout (ms) |
+| `sweep.maxContextFiles` | `5` | Related excerpt cap; Zeta prioritizes LSP retrieval, then visible/recent buffers |
+| `sweep.outlineSymbols` | `0` | Optional nearby LSP functions/methods plus the active symbol path for every model; asynchronous and separate from `maxContextFiles`, a positive value opts in |
 | `sweep.maxRecentChangesChars` | `12000` | Character budget for formatted recent-edit history; `0` disables history |
 | `sweep.includeClipboardContext` | `true` | Include clipboard text as retrieval context; it is emitted last in retrieval |
 | `sweep.stableRetrievalOrdering` | `false` | Sort retrieval chunks deterministically to improve prefix-cache reuse |
@@ -47,10 +53,17 @@ latency — is removed.
 | `sweep.diagRadius` | `12` | ±N lines around cursor; `0` disables |
 | `sweep.broadBefore` | `125` | Lines of broad context before cursor |
 | `sweep.broadAfter` | `75` | Lines of broad context after cursor |
+| `sweep.zetaEditableTokens` | `350` | Approximate editable budget; estimated as UTF-8 bytes / 3 and snapped to complete lines around the cursor |
+| `sweep.zetaContextTokens` | `150` | Approximate additional Zeta-2.1 current-file context budget, using the same tokenizer-free estimate |
 | `sweep.rulesMaxChars` | `3000` | Soft cap on per-language workspace-rules file size; overflow surfaces as a diagnostic + red background in the editor |
 | `sweep.injectInlineDiagnostics` | `false` | Inline `BUG:` comments next to diagnosed lines in the prompt — recommended for 0.5B / 1.5B sweep checkpoints |
 | `sweep.inlineDiagnosticsMarker` | `BUG: LSP error here` | Marker phrase used by the inline injection + response-side strip anchor |
 | `sweep.diagnosticsMessageTransforms` | clang preset | `{regex: replacement}` rewrites applied to every diagnostic message after the built-in normalisations |
+
+Zeta always uses the suffix-first FIM layout and chronological context order
+from its Zed training template. This prioritises edit quality over llama.cpp
+prefix-cache reuse: moving the cursor can change the leading suffix and
+invalidate the server cache.
 
 ## Setup
 
@@ -79,9 +92,10 @@ Then point `sweep.modelName` at the right name. Detection rules:
 
 Sweep's GGUF advertises 32k natively; the full prompt routinely runs
 15–20k tokens for non-trivial files, so a smaller `--ctx-size`
-truncates real prompts. Zeta-2 / 2.1's editable regions are much
-tighter (±15 lines around cursor + tiny ±2-line halos for diagnostic
-regions on 2.1), so those prompts are smaller.
+truncates real prompts. Zeta-2.1 follows the provider profile of roughly
+350 editable and 150 surrounding-context tokens. NESweep estimates those
+budgets as one token per three UTF-8 bytes and expands to whole lines around
+the cursor, avoiding a real tokenizer in the extension-host hot path.
 
 Build & install the extension:
 

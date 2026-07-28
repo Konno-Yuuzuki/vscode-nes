@@ -43,7 +43,12 @@ export function buildZeta2Response(
 	const responses: AutocompleteResponse[] = [];
 
 	if (prompt.format === "zeta2.1") {
-		const markerSpan = parseMarkerSpan(completion.text, regions, primary);
+		const markerSpan = parseMarkerSpan(
+			completion.text,
+			regions,
+			primary,
+			prompt.markerBoundaryLines,
+		);
 		if (markerSpan) {
 			const response = buildRegionResponse(
 				markerSpan.replacement,
@@ -117,6 +122,7 @@ function parseMarkerSpan(
 	text: string,
 	regions: EditRegion[],
 	primary: EditRegion,
+	markerBoundaryLines?: number[],
 ): MarkerSpan | null {
 	type MarkerHit = { num: number; start: number; end: number };
 	const re = /<\|marker_(\d+)\|>/g;
@@ -138,12 +144,12 @@ function parseMarkerSpan(
 	const endMarkerNum = explicitEnd?.num ?? start.num + 1;
 	if (endMarkerNum <= start.num) return null;
 
-	// Marker numbering follows appendCursorFileBodyAndMarkers exactly:
-	// [region0.start, region0.end, region1.start, region1.end, ...].
-	const boundaryLines = regions.flatMap((region) => [
-		region.startLine,
-		region.endLine,
-	]);
+	// New V0318 prompts persist their exact contiguous marker boundaries.
+	// Fall back to the former focused-region mapping for cached/test prompts
+	// created before markerBoundaryLines was added.
+	const boundaryLines =
+		markerBoundaryLines ??
+		regions.flatMap((region) => [region.startLine, region.endLine]);
 	const startLine = boundaryLines[start.num - 1];
 	const endLine = boundaryLines[endMarkerNum - 1];
 	if (startLine === undefined || endLine === undefined || endLine < startLine) {

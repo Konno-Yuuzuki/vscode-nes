@@ -107,6 +107,9 @@ export function activate(context: vscode.ExtensionContext) {
 			tracker.trackChange(event);
 		}
 	});
+	const saveListener = vscode.workspace.onDidSaveTextDocument((document) => {
+		apiClient.handleDocumentSaved(document);
+	});
 
 	const themeChangeListener = vscode.window.onDidChangeActiveColorTheme(() => {
 		refreshTheme();
@@ -180,6 +183,7 @@ export function activate(context: vscode.ExtensionContext) {
 		acceptInlineEditCommand,
 		dismissJumpEditCommand,
 		changeListener,
+		saveListener,
 		editorChangeListener,
 		selectionChangeListener,
 		themeChangeListener,

@@ -16,6 +16,11 @@
 //   {snapshot body}
 //   ...
 //
+//   <|file_sep|>context/outline              active + nearby LSP symbols
+//   active_symbol: Class::method
+//   nearby_functions:
+//   ...
+//
 //   <|file_sep|>{path}.diff                  diff history, if any
 //   original:
 //   {old}
@@ -161,6 +166,11 @@ export function buildSweepPrompt(
 	);
 	if (retrieval !== "") body += retrieval;
 
+	const symbolOutline = req.symbol_outline?.trim() ?? "";
+	if (symbolOutline !== "") {
+		body += `<|file_sep|>context/outline\n${symbolOutline}\n`;
+	}
+
 	const diffSection = formatDiffSection(req.recent_changes);
 	if (diffSection !== "") body += diffSection;
 
@@ -221,6 +231,9 @@ export function buildSweepPrompt(
 
 	return {
 		prompt: body,
+		...(symbolOutline !== ""
+			? { contextStats: { outline: symbolOutline.length } }
+			: {}),
 		prefill,
 		format: "sweep",
 		stopTokens: SWEEP_STOP_TOKENS,

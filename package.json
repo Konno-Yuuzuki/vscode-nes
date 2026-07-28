@@ -2,7 +2,7 @@
 	"name": "nesweep",
 	"displayName": "NESweep autocompletion",
 	"description": "Next Edit Autocomplete using Sweep Model",
-	"version": "1.2.2",
+	"version": "1.2.3",
 	"publisher": "SR-team",
 	"author": {
 		"name": "SR_team"
@@ -137,144 +137,196 @@
 				"when": "editorTextFocus && inlineSuggestionVisible && !suggestWidgetVisible && !sweep.hasJumpEdit"
 			}
 		],
-		"configuration": {
-			"title": "NESweep",
-			"properties": {
-				"sweep.enabled": {
-					"type": "boolean",
-					"default": true,
-					"scope": "window",
-					"markdownDescription": "Enable or disable NESweep suggestions for this window."
-				},
-				"sweep.maxContextFiles": {
-					"type": "number",
-					"default": 5,
-					"markdownDescription": "Maximum number of recently-viewed files to bundle into the prompt as additional context (open editors + LSP definitions / usages). Higher values give the model more to work with at the cost of a longer prompt and slower first-token latency."
-				},
-				"sweep.maxEditHistory": {
-					"type": "number",
-					"default": 15,
-					"minimum": 1,
-					"markdownDescription": "Total number of recent-edit diffs surfaced in the prompt. The budget is split: ~20% reserved as a floor for the active file so its history survives long stints in other files, ~40% spread across up to `#sweep.maxContextFiles#` other recent files, and the remainder fills from the active file's recent activity. Typing-burst edits on the same line within 60 s are coalesced before counting against the budget."
-				},
-				"sweep.maxRecentChangesChars": {
-					"type": "number",
-					"default": 12000,
-					"minimum": 0,
-					"markdownDescription": "Maximum number of characters from formatted recent-edit history to include in the prompt. `#sweep.maxEditHistory#` limits the number of diff records, while this limits their rendered size so large paste/format/bulk edits cannot overflow small model contexts. Set to `0` to omit recent-edit history."
-				},
-				"sweep.includeClipboardContext": {
-					"type": "boolean",
-					"default": true,
-					"markdownDescription": "Include the current clipboard text as retrieval context. Disable this to avoid clipboard changes invalidating the prompt prefix. When enabled, clipboard context is emitted after code retrieval chunks."
-				},
-				"sweep.stableRetrievalOrdering": {
-					"type": "boolean",
-					"default": false,
-					"markdownDescription": "Sort LSP/retrieval chunks deterministically by path and range. This can improve prefix-cache reuse when providers return equivalent results in a different order, at a possible cost to relevance ordering."
-				},
-				"sweep.reuseIdenticalPromptResults": {
-					"type": "boolean",
-					"default": false,
-					"markdownDescription": "Reuse a recent completion result when the complete prompt is byte-for-byte identical. Useful with deterministic temperature-0 models; disabled by default."
-				},
-				"sweep.identicalPromptCacheTtlMs": {
-					"type": "number",
-					"default": 5000,
-					"minimum": 0,
-					"markdownDescription": "How long an identical-prompt completion result may be reused when `sweep.reuseIdenticalPromptResults` is enabled."
-				},
-				"sweep.autocompleteExclusionPatterns": {
-					"type": "array",
-					"items": {
-						"type": "string"
+		"configuration": [
+			{
+				"title": "NESweep: General & Sweep Context",
+				"order": 10,
+				"properties": {
+					"sweep.enabled": {
+						"type": "boolean",
+						"default": true,
+						"order": 10,
+						"scope": "window",
+						"markdownDescription": "Enable or disable NESweep suggestions for this window."
 					},
-					"default": [
-						"**/.env*",
-						"**/*.pem",
-						"**/*.key",
-						"**/*.cert",
-						"**/*.crt",
-						"**/.dev.vars",
-						"**/secrets.yml"
-					],
-					"markdownDescription": "File globs / suffixes that NESweep should never request completions for. Defaults cover the common secret-bearing files (`.env`, `.pem`, `.key`, …) so request bodies don't leak credentials to the completion server. Add project-specific patterns to extend."
-				},
-				"sweep.autocompleteSnoozeUntil": {
-					"type": "number",
-					"default": 0,
-					"markdownDescription": "Pause completions until the given Unix timestamp (milliseconds). `0` disables the snooze. Set via the `NESweep: Snooze` command rather than editing this directly."
-				},
-				"sweep.useCopilotStyleNextEditPresentation": {
-					"type": "boolean",
-					"default": false,
-					"scope": "window",
-					"tags": [
-						"experimental"
-					],
-					"markdownDescription": "Use VS Code's proposed inline edit presentation for next-edit suggestions.\n\n**Warning:** this depends on VS Code proposed API. It only works in VS Code Insiders launched with `--enable-proposed-api=sr-team.nesweep`; without that flag, VS Code may silently ignore the proposed inline completion fields."
-				},
-				"sweep.serverUrl": {
-					"type": "string",
-					"default": "http://localhost:8080",
-					"markdownDescription": "Base URL of the OpenAI-compatible `/v1/completions` server serving the model — e.g. llama.cpp's `llama-server`, vLLM, sglang, Ollama with the OpenAI shim. The extension only POSTs to `/v1/completions`; nothing else on the server is touched."
-				},
-				"sweep.modelName": {
-					"type": "string",
-					"default": "sweepai/sweep-next-edit",
-					"markdownDescription": "Model name sent in the request body's `model` field. The prompt format is auto-selected by substring match against this name:\n\n- **Zeta-2.1 (multi-region)** — names containing `zeta-2.1`, `zeta2.1`, `zeta-2-1`, or `zeta_2_1`. Uses numbered boundaries such as `<|marker_1|>` / `<|marker_2|>` across one editable excerpt and supports up to 3 focused regions per request (cursor area + nearby diagnostics).\n- **Zeta-2 (single-region SeedCoder FIM)** — names containing `zeta-2`, `zeta2`, or `seedcoder`. Uses the legacy git-conflict scaffold `<<<<<<< CURRENT` / `=======` / `>>>>>>> UPDATED`.\n- **Sweep `<|file_sep|>` layout** — anything else (including the default `sweepai/sweep-next-edit`). Uses the broad-context + retrieval + `original/current/updated` triplet structure ported from cursortab.nvim."
-				},
-				"sweep.completionTimeoutMs": {
-					"type": "number",
-					"default": 10000,
-					"markdownDescription": "Per-request timeout in milliseconds. Requests that exceed this are aborted and the suggestion is dropped. Bump it for large prompts on slow hardware; lower it to fail fast on a misconfigured server."
-				},
-				"sweep.diagRadius": {
-					"type": "number",
-					"default": 12,
-					"markdownDescription": "Drop LSP diagnostics whose line is more than this many lines from the cursor before they reach the prompt.\n\n- `0` disables the filter (every diagnostic on the file is kept, capped at 15 entries)\n- Default `12` matches cursortab's behaviour and keeps the diagnostics block compact."
-				},
-				"sweep.broadBefore": {
-					"type": "number",
-					"default": 125,
-					"markdownDescription": "Lines of broad file context to keep **before** the cursor in the leading `<|file_sep|>{path}` section. Cursortab hardcodes ±150; the asymmetric default (125 before / 75 after) biases toward already-written code, where the model usually needs more context."
-				},
-				"sweep.broadAfter": {
-					"type": "number",
-					"default": 75,
-					"markdownDescription": "Lines of broad file context to keep **after** the cursor in the leading `<|file_sep|>{path}` section. See `sweep.broadBefore` for the rationale behind the asymmetric default."
-				},
-				"sweep.rulesMaxChars": {
-					"type": "number",
-					"default": 3000,
-					"markdownDescription": "Soft cap on the size of per-language instructions files (`.vscode/nes-<languageId>.md`).\n\nRules sit at the **front** of every completion prompt — a prefix-cache-friendly slot, so a server with prompt caching (llama.cpp with `-cpent 256` to checkpoint every 256 tokens, vLLM/sglang prefix caching on by default) only re-evaluates the rules block on the first request or when the file changes. The cost of a fat rules file is therefore:\n\n- **Context budget** consumed on every request, even when cached.\n- **Prompt-eval latency spike** on first request and after every save.\n- **No caching benefit at all** if your server has caching off or the threshold is set above the rules-block size.\n\nOverflow surfaces as a Warning diagnostic + red background on the over-limit region in the editor; it does **not** truncate the file or block completions. Set to `0` to disable the warning.\n\nDefault `3000` ≈ ~1000 tokens on the Sweep tokenizer — a reasonable budget for session-stable guidance."
-				},
-				"sweep.injectInlineDiagnostics": {
-					"type": "boolean",
-					"default": false,
-					"markdownDescription": "**Mega-hack: inline `// BUG:` comments next to every nearby diagnosed line in the prompt only.**\n\nAppends `<commentPrefix> <marker> (code: <code>) - <message>` to each diagnosed line in the rendered prompt — inline placement next to the affected token gets the model to attend to LSP errors much more reliably than a sibling diagnostics section. The fake comments are stripped from the response before applying, anchored on the literal `<commentPrefix> <marker>` substring so the strip survives the model paraphrasing the rest of the message body.\n\n**When to enable:**\n- ✅ **0.5B / 1.5B SweepAI checkpoints** — they routinely ignore the structured diagnostics section and need the inline nudge.\n- ❌ **7B SweepAI (default) and 8B Zeta-2 / Zeta-2.1 SeedCoder** — strong enough to pick up the structured block; the inline noise just bloats the prompt.\n\nWhen on, the structured `context/diagnostics` section is suppressed so the same data isn't emitted twice."
-				},
-				"sweep.inlineDiagnosticsMarker": {
-					"type": "string",
-					"default": "BUG: LSP error here",
-					"markdownDescription": "Marker phrase emitted between the language's comment prefix and the diagnostic body when `sweep.injectInlineDiagnostics` is on.\n\nFor C/C++ the default produces:\n```\n// BUG: LSP error here (code: undeclared_var_use_suggest) - use 'spdlog' instead (Use of undeclared identifier 'psdlog')\n```\n\nMust be a phrase a human would essentially never type — the response-side strip pinpoints our injections by matching the literal `<commentPrefix> <marker>` substring, so colliding with user-authored `TODO:` / `FIXME:` comments is undesirable. Different small models seem to attend to different phrasings; tune per model if the default doesn't get traction."
-				},
-				"sweep.diagnosticsMessageTransforms": {
-					"type": "object",
-					"default": {
-						"^(.*?) is a magic number;?\\s*consider replacing it with a named constant\\.?$": "replace $1 with a named constant",
-						"^Included header (\\S+) is not used directly\\.?$": "remove unused #include of $1",
-						"^Variable ['\"`]([^'\"`]+)['\"`] is uninitialized when used here\\.?$": "initialise '$1' before use",
-						"^Implicit conversion loses integer precision: ['\"`]([^'\"`]+)['\"`] to ['\"`]([^'\"`]+)['\"`]\\.?$": "narrow $1 to $2 explicitly with a cast"
+					"sweep.maxContextFiles": {
+						"type": "number",
+						"default": 5,
+						"order": 100,
+						"minimum": 0,
+						"markdownDescription": "Maximum number of related code excerpts to bundle into the prompt. For Zeta, LSP definitions/usages are preferred, then visible and recently-viewed files fill the remaining slots. Higher values give the model more cross-file context at the cost of a longer prompt and slower first-token latency."
 					},
-					"markdownDescription": "Additional regex transforms applied to every diagnostic message **after** the built-in normalisations.\n\nBuilt-ins (always active, can't be turned off):\n- Strip `(fix available)` / `(fixes available)` suffix\n- Rewrite `did you mean 'X'?` → `use 'X' instead`\n- Rewrite `consider using 'X'` → `use 'X' instead`\n- Rewrite `replace with 'X'` → `use 'X' instead`\n\nUser entries:\n- **Key** is a JavaScript regex source. Use `$1`, `$2`, … to reference capture groups in the replacement.\n- **Value** is the replacement string.\n- **Flags** are hardcoded to `i` (case-insensitive). For other flags, encode them in the pattern itself.\n- Invalid regexes are silently skipped — a typo in one entry won't break the rest.\n\nApplied uniformly to **both** the structured `context/diagnostics` section and the inline `// BUG:` injection. Defaults cover common clang / clang-tidy patterns; add entries for other linters as needed.",
-					"additionalProperties": {
+					"sweep.outlineSymbols": {
+						"type": "number",
+						"default": 0,
+						"order": 140,
+						"minimum": 0,
+						"markdownDescription": "Optional number of nearby functions/methods from the active file's LSP Document Symbols outline to include for **all model formats**. The compact `context/outline` section also names the active class/function path (for example `CTextDraw::Draw`). Symbols are ranked by distance from the cursor and restored to source order. Collection is fully asynchronous, never delays a completion, keeps the last complete snapshot while the document is dirty, and refreshes after save. VS Code may still invoke the language server when its own Outline cache has no model for the current document version. This is a separate compact budget and does not consume `#sweep.maxContextFiles#`. Keep the default `0` to avoid Document Symbol provider work; set a positive value to opt in."
+					},
+					"sweep.maxEditHistory": {
+						"type": "number",
+						"default": 15,
+						"order": 110,
+						"minimum": 1,
+						"markdownDescription": "Total number of recent-edit diffs surfaced in the prompt. The budget is split: ~20% reserved as a floor for the active file so its history survives long stints in other files, ~40% spread across up to `#sweep.maxContextFiles#` other recent files, and the remainder fills from the active file's recent activity. Typing-burst edits on the same line within 60 s are coalesced before counting against the budget."
+					},
+					"sweep.maxRecentChangesChars": {
+						"type": "number",
+						"default": 12000,
+						"order": 120,
+						"minimum": 0,
+						"markdownDescription": "Maximum number of characters from formatted recent-edit history to include in the prompt. `#sweep.maxEditHistory#` limits the number of diff records, while this limits their rendered size so large paste/format/bulk edits cannot overflow small model contexts. Set to `0` to omit recent-edit history."
+					},
+					"sweep.includeClipboardContext": {
+						"type": "boolean",
+						"default": true,
+						"order": 130,
+						"markdownDescription": "Include the current clipboard text as retrieval context. Disable this to avoid clipboard changes invalidating the prompt prefix. When enabled, clipboard context is emitted after code retrieval chunks."
+					},
+					"sweep.stableRetrievalOrdering": {
+						"type": "boolean",
+						"default": false,
+						"order": 170,
+						"markdownDescription": "Sort LSP/retrieval chunks deterministically by path and range. This can improve prefix-cache reuse when providers return equivalent results in a different order, at a possible cost to relevance ordering."
+					},
+					"sweep.reuseIdenticalPromptResults": {
+						"type": "boolean",
+						"default": false,
+						"order": 180,
+						"markdownDescription": "Reuse a recent completion result when the complete prompt is byte-for-byte identical. Useful with deterministic temperature-0 models; disabled by default."
+					},
+					"sweep.identicalPromptCacheTtlMs": {
+						"type": "number",
+						"default": 5000,
+						"order": 190,
+						"minimum": 0,
+						"markdownDescription": "How long an identical-prompt completion result may be reused when `sweep.reuseIdenticalPromptResults` is enabled."
+					},
+					"sweep.autocompleteExclusionPatterns": {
+						"type": "array",
+						"order": 50,
+						"items": {
+							"type": "string"
+						},
+						"default": [
+							"**/.env*",
+							"**/*.pem",
+							"**/*.key",
+							"**/*.cert",
+							"**/*.crt",
+							"**/.dev.vars",
+							"**/secrets.yml"
+						],
+						"markdownDescription": "File globs / suffixes that NESweep should never request completions for. Defaults cover the common secret-bearing files (`.env`, `.pem`, `.key`, …) so request bodies don't leak credentials to the completion server. Add project-specific patterns to extend."
+					},
+					"sweep.autocompleteSnoozeUntil": {
+						"type": "number",
+						"default": 0,
+						"order": 60,
+						"markdownDescription": "Pause completions until the given Unix timestamp (milliseconds). `0` disables the snooze. Set via the `NESweep: Snooze` command rather than editing this directly."
+					},
+					"sweep.useCopilotStyleNextEditPresentation": {
+						"type": "boolean",
+						"default": false,
+						"order": 70,
+						"scope": "window",
+						"tags": [
+							"experimental"
+						],
+						"markdownDescription": "Use VS Code's proposed inline edit presentation for next-edit suggestions.\n\n**Warning:** this depends on VS Code proposed API. It only works in VS Code Insiders launched with `--enable-proposed-api=sr-team.nesweep`; without that flag, VS Code may silently ignore the proposed inline completion fields."
+					},
+					"sweep.serverUrl": {
 						"type": "string",
-						"description": "Replacement string ($1, $2, … for capture groups)"
+						"default": "http://localhost:8080",
+						"order": 20,
+						"markdownDescription": "Base URL of the OpenAI-compatible `/v1/completions` server serving the model — e.g. llama.cpp's `llama-server`, vLLM, sglang, Ollama with the OpenAI shim. The extension only POSTs to `/v1/completions`; nothing else on the server is touched."
+					},
+					"sweep.modelName": {
+						"type": "string",
+						"default": "sweepai/sweep-next-edit",
+						"order": 30,
+						"markdownDescription": "Model name sent in the request body's `model` field. The prompt format is auto-selected by substring match against this name:\n\n- **Zeta-2.1 (multi-region)** — names containing `zeta-2.1`, `zeta2.1`, `zeta-2-1`, or `zeta_2_1`. Uses Zed V0318-style numbered boundaries such as `<|marker_1|>` / `<|marker_2|>` throughout one contiguous editable excerpt.\n- **Zeta-2 (single-region SeedCoder FIM)** — names containing `zeta-2`, `zeta2`, or `seedcoder`. Uses the legacy git-conflict scaffold `<<<<<<< CURRENT` / `=======` / `>>>>>>> UPDATED`.\n- **Sweep `<|file_sep|>` layout** — anything else (including the default `sweepai/sweep-next-edit`). Uses the broad-context + retrieval + `original/current/updated` triplet structure ported from cursortab.nvim."
+					},
+					"sweep.completionTimeoutMs": {
+						"type": "number",
+						"default": 10000,
+						"order": 40,
+						"markdownDescription": "Per-request timeout in milliseconds. Requests that exceed this are aborted and the suggestion is dropped. Bump it for large prompts on slow hardware; lower it to fail fast on a misconfigured server."
+					},
+					"sweep.diagRadius": {
+						"type": "number",
+						"default": 12,
+						"order": 160,
+						"markdownDescription": "Drop LSP diagnostics whose line is more than this many lines from the cursor before they reach the prompt.\n\n- `0` disables the filter (every diagnostic on the file is kept, capped at 15 entries)\n- Default `12` matches cursortab's behaviour and keeps the diagnostics block compact."
+					},
+					"sweep.broadBefore": {
+						"type": "number",
+						"default": 125,
+						"order": 210,
+						"markdownDescription": "Lines of broad file context to keep **before** the cursor in the leading `<|file_sep|>{path}` section. Cursortab hardcodes ±150; the asymmetric default (125 before / 75 after) biases toward already-written code, where the model usually needs more context."
+					},
+					"sweep.broadAfter": {
+						"type": "number",
+						"default": 75,
+						"order": 220,
+						"markdownDescription": "Lines of broad file context to keep **after** the cursor in the leading `<|file_sep|>{path}` section. See `sweep.broadBefore` for the rationale behind the asymmetric default."
+					},
+					"sweep.rulesMaxChars": {
+						"type": "number",
+						"default": 3000,
+						"order": 150,
+						"markdownDescription": "Soft cap on the size of per-language instructions files (`.vscode/nes-<languageId>.md`).\n\nRules sit at the **front** of every completion prompt — a prefix-cache-friendly slot, so a server with prompt caching (llama.cpp with `-cpent 256` to checkpoint every 256 tokens, vLLM/sglang prefix caching on by default) only re-evaluates the rules block on the first request or when the file changes. The cost of a fat rules file is therefore:\n\n- **Context budget** consumed on every request, even when cached.\n- **Prompt-eval latency spike** on first request and after every save.\n- **No caching benefit at all** if your server has caching off or the threshold is set above the rules-block size.\n\nOverflow surfaces as a Warning diagnostic + red background on the over-limit region in the editor; it does **not** truncate the file or block completions. Set to `0` to disable the warning.\n\nDefault `3000` ≈ ~1000 tokens on the Sweep tokenizer — a reasonable budget for session-stable guidance."
+					},
+					"sweep.injectInlineDiagnostics": {
+						"type": "boolean",
+						"default": false,
+						"order": 230,
+						"markdownDescription": "**Mega-hack: inline `// BUG:` comments next to every nearby diagnosed line in the prompt only.**\n\nAppends `<commentPrefix> <marker> (code: <code>) - <message>` to each diagnosed line in the rendered prompt — inline placement next to the affected token gets the model to attend to LSP errors much more reliably than a sibling diagnostics section. The fake comments are stripped from the response before applying, anchored on the literal `<commentPrefix> <marker>` substring so the strip survives the model paraphrasing the rest of the message body.\n\n**When to enable:**\n- ✅ **0.5B / 1.5B SweepAI checkpoints** — they routinely ignore the structured diagnostics section and need the inline nudge.\n- ❌ **7B SweepAI (default) and 8B Zeta-2 / Zeta-2.1 SeedCoder** — strong enough to pick up the structured block; the inline noise just bloats the prompt.\n\nWhen on, the structured `context/diagnostics` section is suppressed so the same data isn't emitted twice."
+					},
+					"sweep.inlineDiagnosticsMarker": {
+						"type": "string",
+						"default": "BUG: LSP error here",
+						"order": 240,
+						"markdownDescription": "Marker phrase emitted between the language's comment prefix and the diagnostic body when `sweep.injectInlineDiagnostics` is on.\n\nFor C/C++ the default produces:\n```\n// BUG: LSP error here (code: undeclared_var_use_suggest) - use 'spdlog' instead (Use of undeclared identifier 'psdlog')\n```\n\nMust be a phrase a human would essentially never type — the response-side strip pinpoints our injections by matching the literal `<commentPrefix> <marker>` substring, so colliding with user-authored `TODO:` / `FIXME:` comments is undesirable. Different small models seem to attend to different phrasings; tune per model if the default doesn't get traction."
+					},
+					"sweep.diagnosticsMessageTransforms": {
+						"type": "object",
+						"order": 250,
+						"default": {
+							"^(.*?) is a magic number;?\\s*consider replacing it with a named constant\\.?$": "replace $1 with a named constant",
+							"^Included header (\\S+) is not used directly\\.?$": "remove unused #include of $1",
+							"^Variable ['\"`]([^'\"`]+)['\"`] is uninitialized when used here\\.?$": "initialise '$1' before use",
+							"^Implicit conversion loses integer precision: ['\"`]([^'\"`]+)['\"`] to ['\"`]([^'\"`]+)['\"`]\\.?$": "narrow $1 to $2 explicitly with a cast"
+						},
+						"markdownDescription": "Additional regex transforms applied to every diagnostic message **after** the built-in normalisations.\n\nBuilt-ins (always active, can't be turned off):\n- Strip `(fix available)` / `(fixes available)` suffix\n- Rewrite `did you mean 'X'?` → `use 'X' instead`\n- Rewrite `consider using 'X'` → `use 'X' instead`\n- Rewrite `replace with 'X'` → `use 'X' instead`\n\nUser entries:\n- **Key** is a JavaScript regex source. Use `$1`, `$2`, … to reference capture groups in the replacement.\n- **Value** is the replacement string.\n- **Flags** are hardcoded to `i` (case-insensitive). For other flags, encode them in the pattern itself.\n- Invalid regexes are silently skipped — a typo in one entry won't break the rest.\n\nApplied uniformly to **both** the structured `context/diagnostics` section and the inline `// BUG:` injection. Defaults cover common clang / clang-tidy patterns; add entries for other linters as needed.",
+						"additionalProperties": {
+							"type": "string",
+							"description": "Replacement string ($1, $2, … for capture groups)"
+						}
+					}
+				}
+			},
+			{
+				"title": "NESweep: Zeta Context",
+				"order": 20,
+				"properties": {
+					"sweep.zetaEditableTokens": {
+						"type": "number",
+						"default": 350,
+						"order": 10,
+						"minimum": 1,
+						"markdownDescription": "Approximate total token budget for the line-aligned editable excerpt used by Zeta-2 / Zeta-2.1. NESweep deliberately avoids a real tokenizer on VS Code's hot path: it estimates **1 token per 3 UTF-8 bytes**, starts with the cursor line, and grows the contiguous window in both directions while complete lines fit. Default `350` follows the Zeta V0318 provider profile."
+					},
+					"sweep.zetaContextTokens": {
+						"type": "number",
+						"default": 150,
+						"order": 20,
+						"minimum": 0,
+						"markdownDescription": "Approximate total token budget for additional non-editable current-file context around the Zeta-2.1 editable excerpt. It uses the same cheap **UTF-8 bytes / 3** estimate and whole-line boundaries. Context before the edit is placed in the FIM prefix; context after it is placed in the FIM suffix. Set to `0` to disable this surrounding context. Default `150` follows the Zeta V0318 provider profile."
 					}
 				}
 			}
-		}
+		]
 	},
 	"scripts": {
 		"build": "bun build src/extension/activate.ts --outfile=out/extension.js --external=vscode --format=cjs --target=node",

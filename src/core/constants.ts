@@ -1,5 +1,9 @@
 // Default configuration
 export const DEFAULT_MAX_CONTEXT_FILES = 5;
+// Document Symbols can require an LSP round-trip on every document version.
+// Keep this optional by default; users can opt in when their language server
+// is responsive and the extra structural context is worth the work.
+export const DEFAULT_OUTLINE_SYMBOLS = 0;
 // Overall cap on the recent-edit diffs surfaced in the prompt. Budget is
 // partitioned at read time: a 20% floor for the active file, ~40% spread
 // across other recent files (capped by DEFAULT_MAX_CONTEXT_FILES), the
@@ -20,6 +24,17 @@ export const DEFAULT_DIAG_RADIUS = 12;
 // context typically lives.
 export const DEFAULT_BROAD_BEFORE = 125;
 export const DEFAULT_BROAD_AFTER = 75;
+// Zeta V0318's provider profile selects roughly 350 editable tokens plus
+// 150 surrounding-context tokens. NESweep deliberately avoids loading a
+// tokenizer into the extension host: the prompt builder estimates one token
+// per three UTF-8 bytes, then snaps the resulting excerpt to whole lines.
+export const DEFAULT_ZETA_EDITABLE_TOKENS = 350;
+export const DEFAULT_ZETA_CONTEXT_TOKENS = 150;
+export const ZETA_ESTIMATED_BYTES_PER_TOKEN = 3;
+// Zed's V0318 provider sends at most six edit events. The client selects
+// the newest six and renders them chronologically so the previous prompt
+// remains a prefix while the history is still filling.
+export const ZETA_TRAINING_TEMPLATE_MAX_EDIT_EVENTS = 6;
 
 // Model parameters
 export const MODEL_NAME = "sweepai/sweep-next-edit";

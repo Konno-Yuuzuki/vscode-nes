@@ -55,4 +55,22 @@ describe("formatRecentChanges", () => {
 		expect(result).toContain("...[truncated]");
 		expect(result).not.toContain("File: src/later.ts:");
 	});
+
+	test("can select the newest entries and render them oldest first for Zeta", () => {
+		const result = formatRecentChanges(
+			[
+				{ path: "src/newest.ts", diff: diffWithBody(["+newest"]) },
+				{ path: "src/previous.ts", diff: diffWithBody(["+previous"]) },
+				{ path: "src/oldest.ts", diff: diffWithBody(["+oldest"]) },
+			],
+			1000,
+			{ maxEntries: 2, oldestFirst: true },
+		);
+
+		const previous = result.indexOf("File: src/previous.ts:");
+		const newest = result.indexOf("File: src/newest.ts:");
+		expect(previous).toBeGreaterThanOrEqual(0);
+		expect(newest).toBeGreaterThan(previous);
+		expect(result).not.toContain("File: src/oldest.ts:");
+	});
 });

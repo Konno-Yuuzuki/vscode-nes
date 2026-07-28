@@ -16,7 +16,7 @@ function makePrompt(
 	windowStartLine: number,
 	windowEndLine: number,
 	format: ModelFormat,
-	extraRegions: EditRegion[] = [],
+	markerBoundaryLines?: number[],
 ): ModelPrompt {
 	const lines = splitLines(fileContents);
 	const lineOffsets = computeLineByteOffsets(lines);
@@ -29,9 +29,7 @@ function makePrompt(
 		endLine: windowEndLine,
 		isPrimary: true,
 	};
-	const regions: EditRegion[] = [primary, ...extraRegions].sort(
-		(a, b) => a.startLine - b.startLine,
-	);
+	const regions: EditRegion[] = [primary];
 	return {
 		prompt: "",
 		prefill: "",
@@ -41,6 +39,7 @@ function makePrompt(
 		windowStartLine,
 		windowEndLine,
 		regions,
+		...(markerBoundaryLines ? { markerBoundaryLines } : {}),
 		lines: promptLines,
 		cursorLineByteOffsets: lineOffsets,
 	};
@@ -139,28 +138,23 @@ describe("buildZeta2Response — protocol 2.1 marker handling", () => {
 		expect(noOp).toBeNull();
 	});
 
-	test("multi-region 2.1 maps a later boundary span to its document range", () => {
-		// File with two areas to fix: cursor area on lines 1-3, distant
-		// diagnostic area on lines 6-7.
+	test("multi-region 2.1 maps a later contiguous block to its document range", () => {
 		const fileContents = [
 			"line0", // 0
-			"psdlog::info();", // 1 (primary region: 0-3)
+			"psdlog::info();", // 1
 			"line2", // 2
 			"line3", // 3
 			"line4", // 4
-			"line5", // 5 (gap)
-			"int x = 28;", // 6 (secondary region: 6-8)
+			"line5", // 5
+			"int x = 28;", // 6
 			"line7", // 7
 			"line8", // 8
 			"",
 		].join("\n");
-		const prompt = makePrompt(fileContents, 0, 4, "zeta2.1", [
-			{ startLine: 6, endLine: 8, isPrimary: false },
-		]);
+		const prompt = makePrompt(fileContents, 0, 8, "zeta2.1", [0, 4, 6, 8]);
 
-		// marker_3 and marker_4 are the boundaries of the second focused
-		// region. The response is one contiguous edit, not "pair 2" in an
-		// array of independent edits.
+		// marker_3 and marker_4 delimit the final block in the one contiguous
+		// editable excerpt.
 		const modelOutput =
 			"<|marker_3|>\nint x = NAMED_CONSTANT;\nline7\n<|marker_4|>";
 		const responses = buildZeta2Response(completion(modelOutput), prompt, "id");
@@ -175,7 +169,7 @@ describe("buildZeta2Response — protocol 2.1 marker handling", () => {
 		expect(responses[0]?.autocomplete_id).toBe("id");
 	});
 
-	test("marker_2 to marker_3 replaces the gap between focused regions", () => {
+	test("marker_2 to marker_3 replaces an interior contiguous block", () => {
 		const fileContents = [
 			"primary0",
 			"primary1",
@@ -185,9 +179,7 @@ describe("buildZeta2Response — protocol 2.1 marker handling", () => {
 			"secondary1",
 			"",
 		].join("\n");
-		const prompt = makePrompt(fileContents, 0, 2, "zeta2.1", [
-			{ startLine: 4, endLine: 6, isPrimary: false },
-		]);
+		const prompt = makePrompt(fileContents, 0, 6, "zeta2.1", [0, 2, 4, 6]);
 
 		const responses = buildZeta2Response(
 			completion(
@@ -222,7 +214,7 @@ describe("buildZeta2Response — protocol 2.1 marker handling", () => {
 		expect(responses[0].completion).toBe("b fixed");
 	});
 
-	test("a primary marker span remains valid when later boundaries exist", () => {
+	test("an early marker span remains valid when later boundaries exist", () => {
 		const fileContents = [
 			"line0",
 			"psdlog::info();",
@@ -233,11 +225,9 @@ describe("buildZeta2Response — protocol 2.1 marker handling", () => {
 			"int x = 28;",
 			"",
 		].join("\n");
-		const prompt = makePrompt(fileContents, 0, 4, "zeta2.1", [
-			{ startLine: 6, endLine: 7, isPrimary: false },
-		]);
+		const prompt = makePrompt(fileContents, 0, 7, "zeta2.1", [0, 4, 6, 7]);
 
-		// Model only emits a replacement for the primary region.
+		// Model only emits a replacement for the first V0318 block.
 		const modelOutput =
 			"<|marker_1|>\nline0\nspdlog::info();\nline2\nline3\n<|marker_2|>";
 		const responses = buildZeta2Response(completion(modelOutput), prompt, "id");
@@ -256,9 +246,7 @@ describe("buildZeta2Response — protocol 2.1 marker handling", () => {
 			"after",
 			"",
 		].join("\n");
-		const prompt = makePrompt(fileContents, 0, 2, "zeta2.1", [
-			{ startLine: 3, endLine: 5, isPrimary: false },
-		]);
+		const prompt = makePrompt(fileContents, 0, 5, "zeta2.1", [0, 2, 3, 5]);
 		const modelOutput = [
 			"<|marker_1|>",
 			"before",

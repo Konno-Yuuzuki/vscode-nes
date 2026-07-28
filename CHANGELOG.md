@@ -2,6 +2,16 @@
 
 Notable NESweep fork changes are documented here, starting from the fork point at `v0.5.0-fork.1`.
 
+## 1.2.3 - 2026-07-28
+
+- Ported Zeta-2.1 prompt construction to Zed's V0318-style contiguous editable excerpt with numbered line boundaries and exact response-to-document mapping.
+- Added configurable `350` editable-token and `150` surrounding-context budgets using a fast UTF-8-bytes estimate instead of running a tokenizer in the VS Code extension host.
+- Prioritized LSP definitions and usages for Zeta related context, including distant definitions from the active file, while retaining visible/recent buffers and chronological edit history.
+- Kept Zeta on its suffix-first training-template layout and removed the experimental prompt-profile switch.
+- Added an optional active-symbol/nearby-functions outline for every model format. Document Symbols are collected asynchronously, never block completion, retain the last complete snapshot while a document is dirty, and refresh after save.
+- Added prompt-section size diagnostics and explicit human-friendly ordering for VS Code settings.
+- Added regression coverage for Zeta prompt windows and markers, related context, symbol outlines, dirty-document snapshots, stale provider responses, and provider timeouts.
+
 ## 1.2.2 - 2026-07-28
 
 - Fixed Zeta-2.1 numbered-marker parsing so arbitrary marker spans map to the correct editable line boundaries, including deletion-only edits.

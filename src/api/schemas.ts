@@ -52,6 +52,9 @@ export const AutocompleteRequestSchema = z.object({
 	multiple_suggestions: z.boolean(),
 	file_chunks: z.array(FileChunkSchema),
 	retrieval_chunks: z.array(FileChunkSchema),
+	// Compact Document Symbols outline for the active file. It contains the
+	// active class/function path plus a bounded set of nearby callables.
+	symbol_outline: z.string().optional(),
 	editor_diagnostics: z.array(EditorDiagnosticSchema),
 	recent_user_actions: z.array(UserActionSchema),
 	use_bytes: z.boolean(),

@@ -36,6 +36,7 @@ mock.module("vscode", () => ({
 		createOutputChannel: () => noopChannel,
 		activeTextEditor: undefined,
 		visibleTextEditors: [],
+		state: { focused: true },
 		onDidChangeActiveTextEditor: () => ({ dispose: () => {} }),
 		onDidChangeActiveColorTheme: () => ({ dispose: () => {} }),
 		onDidChangeTextEditorSelection: () => ({ dispose: () => {} }),
@@ -55,6 +56,7 @@ mock.module("vscode", () => ({
 		}),
 		getWorkspaceFolder: () => undefined,
 		onDidChangeTextDocument: () => ({ dispose: () => {} }),
+		onDidSaveTextDocument: () => ({ dispose: () => {} }),
 		onDidChangeConfiguration: () => ({ dispose: () => {} }),
 		fs: {
 			stat: () =>

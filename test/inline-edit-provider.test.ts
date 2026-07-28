@@ -11,10 +11,10 @@ import {
 import type { JumpEditManager } from "~/editor/jump-edit-manager.ts";
 import type { DocumentTracker } from "~/telemetry/document-tracker.ts";
 
-function makeOneLineDocument(text: string): vscode.TextDocument {
+function makeOneLineDocument(text: string, version = 1): vscode.TextDocument {
 	return {
 		uri: { toString: () => "file:///test.ts" },
-		version: 1,
+		version,
 		getText: (range?: vscode.Range) => {
 			if (!range) return text;
 			const start = (range.start as vscode.Position).character;
@@ -67,6 +67,51 @@ function normalizeResult(
 		) => AutocompleteResult | null;
 	};
 	return provider.normalizeInlineResult(document, position, result);
+}
+
+function requestIsStale(
+	document: vscode.TextDocument,
+	position: vscode.Position,
+	snapshotOverrides: Partial<{
+		uri: string;
+		version: number;
+		position: vscode.Position;
+		content: string;
+		cursorOffset: number;
+	}> = {},
+): boolean {
+	const provider = new InlineEditProvider(
+		{} as DocumentTracker,
+		{} as JumpEditManager,
+		{} as ApiClient,
+	) as unknown as {
+		isRequestStale: (
+			snapshot: {
+				uri: string;
+				version: number;
+				position: vscode.Position;
+				content: string;
+				cursorOffset: number;
+			},
+			token: vscode.CancellationToken,
+		) => boolean;
+	};
+	const editor = {
+		document,
+		selection: new vscode.Selection(position, position),
+	} as unknown as vscode.TextEditor;
+	setActiveTextEditor(editor);
+	return provider.isRequestStale(
+		{
+			uri: document.uri.toString(),
+			version: document.version,
+			position,
+			content: document.getText(),
+			cursorOffset: document.offsetAt(position),
+			...snapshotOverrides,
+		},
+		{ isCancellationRequested: false } as vscode.CancellationToken,
+	);
 }
 
 function applyOneLineItem(
@@ -363,6 +408,22 @@ describe("InlineEditProvider normalizeInlineResult", () => {
 		) as vscode.InlineCompletionItem & { isInlineEdit?: boolean };
 		expect(item?.isInlineEdit).toBe(true);
 		expect(applyOneLineItem(text, item)).toBe("keep ");
+	});
+});
+
+describe("InlineEditProvider strict stale-response rejection", () => {
+	test("accepts only an unchanged document version, content, and cursor", () => {
+		const position = new vscode.Position(0, 3);
+		const document = makeOneLineDocument("abc", 7);
+
+		expect(requestIsStale(document, position)).toBe(false);
+		expect(requestIsStale(document, position, { version: 6 })).toBe(true);
+		expect(requestIsStale(document, position, { content: "ab" })).toBe(true);
+		expect(
+			requestIsStale(document, position, {
+				position: new vscode.Position(0, 2),
+			}),
+		).toBe(true);
 	});
 });
 

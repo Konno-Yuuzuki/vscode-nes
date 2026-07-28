@@ -9,8 +9,11 @@ import {
 	DEFAULT_MAX_CONTEXT_FILES,
 	DEFAULT_MAX_EDIT_HISTORY,
 	DEFAULT_MAX_RECENT_CHANGES_CHARS,
+	DEFAULT_OUTLINE_SYMBOLS,
 	DEFAULT_RULES_MAX_CHARS,
 	DEFAULT_SERVER_URL,
+	DEFAULT_ZETA_CONTEXT_TOKENS,
+	DEFAULT_ZETA_EDITABLE_TOKENS,
 	MODEL_NAME,
 } from "~/core/constants.ts";
 
@@ -32,10 +35,14 @@ export class SweepConfig {
 	}
 
 	get maxContextFiles(): number {
-		return this.config.get<number>(
+		return this.nonNegativeInteger(
 			"maxContextFiles",
 			DEFAULT_MAX_CONTEXT_FILES,
 		);
+	}
+
+	get outlineSymbols(): number {
+		return this.nonNegativeInteger("outlineSymbols", DEFAULT_OUTLINE_SYMBOLS);
 	}
 
 	get maxEditHistory(): number {
@@ -110,8 +117,29 @@ export class SweepConfig {
 		return this.config.get<number>("broadAfter", DEFAULT_BROAD_AFTER);
 	}
 
+	get zetaEditableTokens(): number {
+		return Math.max(
+			1,
+			this.nonNegativeInteger(
+				"zetaEditableTokens",
+				DEFAULT_ZETA_EDITABLE_TOKENS,
+			),
+		);
+	}
+
+	get zetaContextTokens(): number {
+		return this.nonNegativeInteger(
+			"zetaContextTokens",
+			DEFAULT_ZETA_CONTEXT_TOKENS,
+		);
+	}
+
 	get rulesMaxChars(): number {
 		return this.config.get<number>("rulesMaxChars", DEFAULT_RULES_MAX_CHARS);
+	}
+
+	private nonNegativeInteger(key: string, fallback: number): number {
+		return Math.max(0, Math.floor(this.config.get<number>(key, fallback)));
 	}
 
 	// Recommended for the small SweepAI checkpoints (0.5B and 1.5B) that

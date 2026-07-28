@@ -86,10 +86,14 @@ type DocumentSymbolLoader = (
 	uri: vscode.Uri,
 ) => Thenable<vscode.DocumentSymbol[] | vscode.SymbolInformation[] | undefined>;
 
+type RetrievalFileLoader = (uri: vscode.Uri) => Thenable<Uint8Array>;
+
 export interface ApiClientOptions {
 	documentSymbolLoader?: DocumentSymbolLoader;
 	outlineProviderTimeoutMs?: number;
 	outlineProviderRetryBackoffMs?: number;
+	retrievalFileLoader?: RetrievalFileLoader;
+	openDocumentsProvider?: () => readonly vscode.TextDocument[];
 }
 
 // Per-chunk retrieval truncation. Original Sweep used 200 lines against a
@@ -183,6 +187,8 @@ export class ApiClient {
 	private readonly documentSymbolLoader: DocumentSymbolLoader;
 	private readonly outlineProviderTimeoutMs: number;
 	private readonly outlineProviderRetryBackoffMs: number;
+	private readonly retrievalFileLoader: RetrievalFileLoader;
+	private readonly openDocumentsProvider: () => readonly vscode.TextDocument[];
 	private idCounter = 0;
 	private readonly documentSymbolsCache = new Map<
 		string,
@@ -213,6 +219,11 @@ export class ApiClient {
 			options.outlineProviderRetryBackoffMs ??
 				OUTLINE_PROVIDER_RETRY_BACKOFF_MS,
 		);
+		this.retrievalFileLoader =
+			options.retrievalFileLoader ??
+			((uri) => vscode.workspace.fs.readFile(uri));
+		this.openDocumentsProvider =
+			options.openDocumentsProvider ?? (() => vscode.workspace.textDocuments);
 	}
 
 	get isProcessing(): boolean {
@@ -860,13 +871,46 @@ export class ApiClient {
 	private async buildChunkFromLocation(
 		location: vscode.Location,
 	): Promise<FileChunk | null> {
-		let targetDocument: vscode.TextDocument;
+		const targetDocument = this.openDocumentsProvider().find(
+			(document) => document.uri.toString() === location.uri.toString(),
+		);
+		if (targetDocument) {
+			return this.buildChunkFromOpenDocument(targetDocument, location);
+		}
+
+		let text: string;
 		try {
-			targetDocument = await vscode.workspace.openTextDocument(location.uri);
+			const bytes = await this.retrievalFileLoader(location.uri);
+			text = new TextDecoder().decode(bytes);
 		} catch {
 			return null;
 		}
 
+		const lines = text.split(/\r?\n/);
+		const totalLines = lines.length;
+		if (totalLines === 0) return null;
+
+		const startLine = Math.max(
+			0,
+			location.range.start.line - RETRIEVAL_CONTEXT_LINES_ABOVE,
+		);
+		const endLine = Math.min(
+			totalLines - 1,
+			location.range.end.line + RETRIEVAL_CONTEXT_LINES_BELOW,
+		);
+		const content = lines
+			.slice(startLine, endLine + 1)
+			.join("\n")
+			.trim();
+		if (!content) return null;
+
+		return this.makeLocationChunk(location.uri, startLine, endLine, content);
+	}
+
+	private buildChunkFromOpenDocument(
+		targetDocument: vscode.TextDocument,
+		location: vscode.Location,
+	): FileChunk | null {
 		const totalLines = targetDocument.lineCount;
 		if (totalLines === 0) return null;
 
@@ -889,9 +933,22 @@ export class ApiClient {
 		const content = targetDocument.getText(range).trim();
 		if (!content) return null;
 
+		return this.makeLocationChunk(
+			targetDocument.uri,
+			startLine,
+			endLine,
+			content,
+		);
+	}
+
+	private makeLocationChunk(
+		uri: vscode.Uri,
+		startLine: number,
+		endLine: number,
+		content: string,
+	): FileChunk {
 		return {
-			file_path:
-				toUnixPath(targetDocument.uri.fsPath) || targetDocument.uri.toString(),
+			file_path: toUnixPath(uri.fsPath) || uri.toString(),
 			start_line: startLine + 1,
 			end_line: endLine + 1,
 			content,

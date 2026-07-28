@@ -2,6 +2,12 @@
 
 Notable NESweep fork changes are documented here, starting from the fork point at `v0.5.0-fork.1`.
 
+## 1.2.5 - 2026-07-29
+
+- Fixed extension-host freezes caused by opening LSP definition/reference targets as hidden VS Code documents, which could trigger hundreds of clangd CodeLens and semantic-token requests for large SDK headers.
+- Read unopened retrieval targets directly through `workspace.fs` while continuing to use live contents for documents that are already open, preserving unsaved related-code context without activating editor features for hidden files.
+- Added regression coverage for side-effect-free retrieval loading and unsaved open-document context.
+
 ## 1.2.4 - 2026-07-28
 
 - Fixed completion requests getting stuck until the full timeout when llama-swap or an upstream server aborts or prematurely closes an HTTP response.

@@ -57,6 +57,8 @@ export class CompletionClient {
 
 		return new Promise((resolve, reject) => {
 			let settled = false;
+			let responseEnded = false;
+			let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
 			const finish = (fn: () => void) => {
 				if (settled) return;
 				settled = true;
@@ -78,10 +80,12 @@ export class CompletionClient {
 
 			const httpReq = transport.request(reqOptions, (res) => {
 				let data = "";
-				res.on("data", (chunk) => {
+
+				const onResponseData = (chunk: Buffer | string) => {
 					data += chunk.toString();
-				});
-				res.on("end", () => {
+				};
+				const onResponseEnd = () => {
+					responseEnded = true;
 					if (res.statusCode !== 200) {
 						finish(() =>
 							reject(
@@ -111,7 +115,37 @@ export class CompletionClient {
 							reject(new Error("Failed to parse completion response")),
 						);
 					}
-				});
+				};
+				const onResponseAborted = () => {
+					finish(() =>
+						reject(
+							new Error(
+								`Completion response aborted (${res.statusCode ?? "unknown"}): ${data}`,
+							),
+						),
+					);
+				};
+				const onResponseError = (error: Error) => {
+					finish(() =>
+						reject(new Error(`Completion response error: ${error.message}`)),
+					);
+				};
+				const onResponseClose = () => {
+					if (responseEnded || res.complete) return;
+					finish(() =>
+						reject(
+							new Error(
+								`Completion response closed before completion (${res.statusCode ?? "unknown"}): ${data}`,
+							),
+						),
+					);
+				};
+
+				res.on("data", onResponseData);
+				res.on("end", onResponseEnd);
+				res.on("aborted", onResponseAborted);
+				res.on("error", onResponseError);
+				res.on("close", onResponseClose);
 			});
 
 			const onError = (error: Error) => {
@@ -124,25 +158,33 @@ export class CompletionClient {
 				const err = new Error(
 					`Completion request timed out after ${req.timeoutMs}ms`,
 				);
-				httpReq.destroy();
-				finish(() => reject(err));
+				finish(() => {
+					httpReq.destroy();
+					reject(err);
+				});
 			};
 
 			const onAbort = () => {
 				const abortError = new Error("Request aborted");
 				abortError.name = "AbortError";
-				httpReq.destroy();
-				finish(() => reject(abortError));
+				finish(() => {
+					httpReq.destroy();
+					reject(abortError);
+				});
 			};
 
 			const cleanup = () => {
-				httpReq.off("error", onError);
+				if (deadlineTimer) {
+					clearTimeout(deadlineTimer);
+					deadlineTimer = undefined;
+				}
 				httpReq.off("timeout", onTimeout);
 				if (signal) signal.removeEventListener("abort", onAbort);
 			};
 
 			httpReq.on("error", onError);
 			httpReq.on("timeout", onTimeout);
+			deadlineTimer = setTimeout(onTimeout, req.timeoutMs);
 			if (signal) {
 				if (signal.aborted) {
 					onAbort();

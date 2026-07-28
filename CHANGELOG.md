@@ -2,6 +2,12 @@
 
 Notable NESweep fork changes are documented here, starting from the fork point at `v0.5.0-fork.1`.
 
+## 1.2.4 - 2026-07-28
+
+- Fixed completion requests getting stuck until the full timeout when llama-swap or an upstream server aborts or prematurely closes an HTTP response.
+- Added an absolute wall-clock request deadline that remains active after response headers or a partial body arrive, keeping the extension host and status-bar animation responsive.
+- Added regression coverage for aborted HTTP responses and incomplete successful responses that never finish.
+
 ## 1.2.3 - 2026-07-28
 
 - Ported Zeta-2.1 prompt construction to Zed's V0318-style contiguous editable excerpt with numbered line boundaries and exact response-to-document mapping.

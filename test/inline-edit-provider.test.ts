@@ -7,6 +7,7 @@ import {
 	type AcceptedInlineSuggestion,
 	InlineEditProvider,
 	inlineEditMatchesSelectedCompletion,
+	splitDisjointLineEdits,
 } from "~/editor/inline-edit-provider.ts";
 import type { JumpEditManager } from "~/editor/jump-edit-manager.ts";
 import type { DocumentTracker } from "~/telemetry/document-tracker.ts";
@@ -338,6 +339,107 @@ describe("InlineEditProvider recent context", () => {
 		expect(
 			provider.buildVisibleEditorBuffers("file:///project/test.cpp"),
 		).toEqual([]);
+	});
+});
+
+describe("splitDisjointLineEdits", () => {
+	test("splits separated replacement hunks without including unchanged lines", () => {
+		const original = "before\nfirst\nunchanged\nsecond\nafter";
+		const result: AutocompleteResult = {
+			id: "suggestion",
+			startIndex: 0,
+			endIndex: original.length,
+			completion: "before\nFIRST\nunchanged\nSECOND\nafter",
+			confidence: 0.8,
+			finishReason: "stop",
+		};
+
+		expect(splitDisjointLineEdits(original, result)).toEqual([
+			{
+				...result,
+				id: "suggestion:part1",
+				startIndex: 7,
+				endIndex: 12,
+				completion: "FIRST",
+			},
+			{
+				...result,
+				id: "suggestion:part2",
+				startIndex: 23,
+				endIndex: 29,
+				completion: "SECOND",
+			},
+		]);
+	});
+
+	test("splits a final insertion after a separate replacement", () => {
+		const original = "first\nunchanged\nlast";
+		const result: AutocompleteResult = {
+			id: "suggestion",
+			startIndex: 0,
+			endIndex: original.length,
+			completion: "FIRST\nunchanged\nlast\nSECOND",
+			confidence: 0.8,
+			finishReason: "stop",
+		};
+
+		expect(splitDisjointLineEdits(original, result)).toEqual([
+			{
+				...result,
+				id: "suggestion:part1",
+				startIndex: 0,
+				endIndex: 5,
+				completion: "FIRST",
+			},
+			{
+				...result,
+				id: "suggestion:part2",
+				startIndex: original.length,
+				endIndex: original.length,
+				completion: "\nSECOND",
+			},
+		]);
+	});
+
+	test("preserves an omitted tail after the final replacement hunk", () => {
+		const original = "first\nunchanged\nsecond\nunchanged tail\nlast tail";
+		const result: AutocompleteResult = {
+			id: "suggestion",
+			startIndex: 0,
+			endIndex: original.length,
+			completion: "FIRST\nunchanged\nSECOND",
+			confidence: 0.8,
+			finishReason: "stop",
+		};
+
+		expect(splitDisjointLineEdits(original, result)).toEqual([
+			{
+				...result,
+				id: "suggestion:part1",
+				startIndex: 0,
+				endIndex: 5,
+				completion: "FIRST",
+			},
+			{
+				...result,
+				id: "suggestion:part2",
+				startIndex: 16,
+				endIndex: 22,
+				completion: "SECOND",
+			},
+		]);
+	});
+
+	test("keeps insertion and deletion hunks together for safe newline handling", () => {
+		const result: AutocompleteResult = {
+			id: "suggestion",
+			startIndex: 0,
+			endIndex: "one\ntwo\nthree".length,
+			completion: "ONE\ninserted\ntwo\nTHREE",
+			confidence: 0.8,
+			finishReason: "stop",
+		};
+		expect(splitDisjointLineEdits("one\ntwo\nthree", result)).toEqual([result]);
 	});
 });
 

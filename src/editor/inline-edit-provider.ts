@@ -22,6 +22,7 @@ const BULK_CHANGE_LOOKBACK_MS = 1500;
 const BULK_CHANGE_CHAR_THRESHOLD = 200;
 const BULK_CHANGE_LINE_THRESHOLD = 8;
 const SELECTION_LOOKBACK_MS = 5000;
+const MAX_SPLIT_DIFF_LINES = 128;
 
 interface QueuedSuggestionState {
 	uri: string;
@@ -89,6 +90,176 @@ function rangesEqual(a: vscode.Range, b: vscode.Range): boolean {
 
 function positionsEqual(a: vscode.Position, b: vscode.Position): boolean {
 	return a.line === b.line && a.character === b.character;
+}
+
+interface LineEdit {
+	oldStart: number;
+	oldEnd: number;
+	newStart: number;
+	newEnd: number;
+}
+
+/**
+ * Split independent replacement hunks so proposed inline edits do not render
+ * unchanged code between them as one large Copilot-style suggestion. A final
+ * insertion can be split safely because it is anchored at the end of the
+ * original range. A final shortened hunk is treated as a truncated model
+ * tail, preserving unmatched old lines rather than turning the last intended
+ * replacement into a large deletion.
+ */
+export function splitDisjointLineEdits(
+	documentText: string,
+	result: AutocompleteResult,
+): AutocompleteResult[] {
+	if (
+		result.cursorTargetOffset !== undefined ||
+		result.startIndex < 0 ||
+		result.endIndex < result.startIndex ||
+		result.endIndex > documentText.length
+	) {
+		return [result];
+	}
+
+	const oldText = documentText.slice(result.startIndex, result.endIndex);
+	const oldLines = oldText.split("\n");
+	const newLines = result.completion.split("\n");
+	if (
+		oldLines.length > MAX_SPLIT_DIFF_LINES ||
+		newLines.length > MAX_SPLIT_DIFF_LINES
+	) {
+		return [result];
+	}
+
+	const edits = findLineEdits(oldLines, newLines);
+	if (edits.length < 2) return [result];
+
+	const splitEdits: LineEdit[] = [];
+	for (let index = 0; index < edits.length; index++) {
+		const edit = edits[index];
+		if (!edit) return [result];
+		const oldLength = edit.oldEnd - edit.oldStart;
+		const newLength = edit.newEnd - edit.newStart;
+		if (oldLength === newLength && oldLength > 0) {
+			splitEdits.push(edit);
+			continue;
+		}
+		// Sweep sometimes stops directly after the final replacement, omitting
+		// the unchanged tail of the rewrite window. Preserve that tail so it
+		// does not become a destructive deletion in the last small suggestion.
+		if (index === edits.length - 1 && oldLength > newLength && newLength > 0) {
+			splitEdits.push({
+				...edit,
+				oldEnd: edit.oldStart + newLength,
+			});
+			continue;
+		}
+		if (
+			index === edits.length - 1 &&
+			oldLength === 0 &&
+			newLength > 0 &&
+			edit.oldStart === oldLines.length
+		) {
+			splitEdits.push(edit);
+			continue;
+		}
+		return [result];
+	}
+
+	const oldLineOffsets = lineOffsets(oldLines);
+	return splitEdits.map((edit, index) => {
+		const isFinalInsertion =
+			edit.oldStart === edit.oldEnd && edit.oldStart === oldLines.length;
+		const oldSegment = oldLines.slice(edit.oldStart, edit.oldEnd).join("\n");
+		const insertionPrefix = isFinalInsertion ? "\n" : "";
+		const relativeStart = isFinalInsertion
+			? oldText.length
+			: (oldLineOffsets[edit.oldStart] ?? 0);
+		return {
+			...result,
+			id: `${result.id}:part${index + 1}`,
+			startIndex: result.startIndex + relativeStart,
+			endIndex: result.startIndex + relativeStart + oldSegment.length,
+			completion:
+				insertionPrefix + newLines.slice(edit.newStart, edit.newEnd).join("\n"),
+		};
+	});
+}
+
+function lineOffsets(lines: string[]): number[] {
+	const offsets = [0];
+	for (const line of lines) {
+		offsets.push((offsets.at(-1) ?? 0) + line.length + 1);
+	}
+	return offsets;
+}
+
+function findLineEdits(oldLines: string[], newLines: string[]): LineEdit[] {
+	const oldCount = oldLines.length;
+	const newCount = newLines.length;
+	const lcs = Array.from(
+		{ length: oldCount + 1 },
+		() => new Uint16Array(newCount + 1),
+	);
+	for (let oldIndex = oldCount - 1; oldIndex >= 0; oldIndex--) {
+		for (let newIndex = newCount - 1; newIndex >= 0; newIndex--) {
+			if (oldLines[oldIndex] === newLines[newIndex]) {
+				lcs[oldIndex][newIndex] = (lcs[oldIndex + 1]?.[newIndex + 1] ?? 0) + 1;
+			} else {
+				lcs[oldIndex][newIndex] = Math.max(
+					lcs[oldIndex + 1]?.[newIndex] ?? 0,
+					lcs[oldIndex]?.[newIndex + 1] ?? 0,
+				);
+			}
+		}
+	}
+
+	const edits: LineEdit[] = [];
+	let oldIndex = 0;
+	let newIndex = 0;
+	let current: LineEdit | null = null;
+	const closeCurrent = () => {
+		if (!current) return;
+		edits.push(current);
+		current = null;
+	};
+	const extendCurrent = () => {
+		if (!current) {
+			current = {
+				oldStart: oldIndex,
+				oldEnd: oldIndex,
+				newStart: newIndex,
+				newEnd: newIndex,
+			};
+		}
+		return current;
+	};
+
+	while (oldIndex < oldCount || newIndex < newCount) {
+		if (
+			oldIndex < oldCount &&
+			newIndex < newCount &&
+			oldLines[oldIndex] === newLines[newIndex]
+		) {
+			closeCurrent();
+			oldIndex++;
+			newIndex++;
+			continue;
+		}
+		if (
+			newIndex < newCount &&
+			(oldIndex === oldCount ||
+				(lcs[oldIndex]?.[newIndex + 1] ?? 0) >
+					(lcs[oldIndex + 1]?.[newIndex] ?? 0))
+		) {
+			extendCurrent().newEnd++;
+			newIndex++;
+		} else {
+			extendCurrent().oldEnd++;
+			oldIndex++;
+		}
+	}
+	closeCurrent();
+	return edits;
 }
 
 export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
@@ -272,6 +443,12 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 				results = extendedResults;
 			}
 
+			if (config.useCopilotStyleNextEditPresentation) {
+				results = results.flatMap((result) =>
+					splitDisjointLineEdits(document.getText(), result),
+				);
+			}
+
 			if (
 				isOwnRequest &&
 				isLatestRequest &&
@@ -301,6 +478,10 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 
 			let renderMode: "INLINE" | "JUMP" | null = null;
 			const inlineResults: AutocompleteResult[] = [];
+			const copilotResults: Array<{
+				result: AutocompleteResult;
+				isJump: boolean;
+			}> = [];
 			let jumpResult: AutocompleteResult | null = null;
 
 			for (const result of results) {
@@ -348,6 +529,14 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 					continue;
 				}
 
+				if (config.useCopilotStyleNextEditPresentation) {
+					copilotResults.push({
+						result: normalizedResult,
+						isJump: classification.decision === "JUMP",
+					});
+					continue;
+				}
+
 				if (classification.decision === "JUMP") {
 					if (!renderMode) {
 						renderMode = "JUMP";
@@ -362,6 +551,32 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 				if (renderMode === "INLINE") {
 					inlineResults.push(normalizedResult);
 				}
+			}
+
+			if (config.useCopilotStyleNextEditPresentation) {
+				const firstCopilotResult = copilotResults[0];
+				if (!firstCopilotResult) {
+					this.jumpEditManager.clearJumpEdit();
+					this.clearSuggestionQueue("no renderable Copilot-style suggestions");
+					return undefined;
+				}
+				this.setSuggestionQueue(
+					uri,
+					copilotResults.slice(1).map((candidate) => candidate.result),
+				);
+				this.jumpEditManager.clearJumpEdit();
+				logger.info("Rendering Copilot-style inline edit sequence", {
+					count: copilotResults.length,
+					id: firstCopilotResult.result.id,
+				});
+				return this.buildCompletionItem(
+					document,
+					position,
+					firstCopilotResult.result,
+					firstCopilotResult.isJump
+						? { useProposedInlineEditPresentation: true }
+						: undefined,
+				);
 			}
 
 			if (renderMode === "JUMP" && jumpResult) {

@@ -690,10 +690,11 @@ export class ApiClient {
 		if (!entry) return [];
 
 		// Document Symbols are optional context and must never delay a
-		// completion. Keep the last complete snapshot while the editor is
-		// dirty; otherwise a parser can replace a healthy outline with a
-		// transient partial tree in the middle of a typing burst.
-		if (!document.isDirty && entry.version !== document.version) {
+		// completion. A provider can resolve symbols for a dirty document, so
+		// refresh on every document version rather than freezing the last saved
+		// outline. The request remains asynchronous and a response is accepted
+		// only if the document is still at the requested version.
+		if (entry.version !== document.version) {
 			this.refreshDocumentSymbols(document, entry);
 		}
 		return entry.symbols;
@@ -736,7 +737,7 @@ export class ApiClient {
 		document: vscode.TextDocument,
 		entry: DocumentSymbolsCacheEntry,
 	): void {
-		if (document.isDirty || entry.inFlight || Date.now() < entry.retryAfter) {
+		if (entry.inFlight || Date.now() < entry.retryAfter) {
 			return;
 		}
 
@@ -760,11 +761,7 @@ export class ApiClient {
 
 			try {
 				const symbols = (await this.documentSymbolLoader(document.uri)) ?? [];
-				if (
-					timedOut ||
-					document.isDirty ||
-					document.version !== requestedVersion
-				) {
+				if (timedOut || document.version !== requestedVersion) {
 					return;
 				}
 				entry.symbols = symbols;

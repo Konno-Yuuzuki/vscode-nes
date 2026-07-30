@@ -31,7 +31,7 @@ export interface SymbolInformationLike {
 
 export type OutlineSymbolLike = DocumentSymbolLike | SymbolInformationLike;
 
-interface CallableEntry {
+interface OutlineEntry {
 	path: string;
 	detail: string;
 	startLine: number;
@@ -58,14 +58,13 @@ const SYMBOL_KIND = {
 	function: 11,
 	struct: 22,
 	operator: 24,
+	property: 6,
+	field: 7,
+	variable: 12,
+	constant: 13,
+	enumMember: 21,
+	typeParameter: 25,
 } as const;
-
-const CALLABLE_KINDS = new Set<number>([
-	SYMBOL_KIND.method,
-	SYMBOL_KIND.constructor,
-	SYMBOL_KIND.function,
-	SYMBOL_KIND.operator,
-]);
 
 const PATH_KINDS = new Set<number>([
 	SYMBOL_KIND.module,
@@ -81,6 +80,21 @@ const PATH_KINDS = new Set<number>([
 	SYMBOL_KIND.operator,
 ]);
 
+// `outlineSymbols` is a symbol budget, not a callable-only budget. C/C++
+// providers commonly expose fields, enum values, and globals but flatten or
+// omit method children, so limiting this to functions made a setting of 32
+// collapse to just the active class. Keep containers too: they describe the
+// surrounding API when there are no leaf symbols.
+const CONTEXT_SYMBOL_KINDS = new Set<number>([
+	...PATH_KINDS,
+	SYMBOL_KIND.property,
+	SYMBOL_KIND.field,
+	SYMBOL_KIND.variable,
+	SYMBOL_KIND.constant,
+	SYMBOL_KIND.enumMember,
+	SYMBOL_KIND.typeParameter,
+]);
+
 export function formatSymbolOutline(
 	symbols: readonly OutlineSymbolLike[],
 	cursorLine0: number,
@@ -89,7 +103,7 @@ export function formatSymbolOutline(
 	const limit = Math.max(0, Math.floor(maxSymbols));
 	if (limit === 0 || symbols.length === 0) return "";
 
-	const callables: CallableEntry[] = [];
+	const entries: OutlineEntry[] = [];
 	let active: ActiveEntry | null = null;
 
 	const considerActive = (
@@ -116,13 +130,14 @@ export function formatSymbolOutline(
 		const extendsPath = PATH_KINDS.has(symbol.kind) && name !== "";
 		const pathParts = extendsPath ? [...parents, name] : [...parents];
 		const path = pathParts.join("::");
+		const displayPath = extendsPath ? path : [...parents, name].join("::");
 
 		if (extendsPath) {
 			considerActive(path, symbol.range, pathParts.length);
 		}
-		if (CALLABLE_KINDS.has(symbol.kind) && path !== "") {
-			callables.push({
-				path,
+		if (CONTEXT_SYMBOL_KINDS.has(symbol.kind) && displayPath !== "") {
+			entries.push({
+				path: displayPath,
 				detail: cleanInlineText(symbol.detail ?? "", 160),
 				startLine: symbol.range.start.line,
 				endLine: symbol.range.end.line,
@@ -142,8 +157,8 @@ export function formatSymbolOutline(
 			if (PATH_KINDS.has(symbol.kind) && path !== "") {
 				considerActive(path, symbol.location.range, container ? 2 : 1);
 			}
-			if (CALLABLE_KINDS.has(symbol.kind) && path !== "") {
-				callables.push({
+			if (CONTEXT_SYMBOL_KINDS.has(symbol.kind) && path !== "") {
+				entries.push({
 					path,
 					detail: "",
 					startLine: symbol.location.range.start.line,
@@ -155,7 +170,7 @@ export function formatSymbolOutline(
 		}
 	}
 
-	const selected = callables
+	const selected = entries
 		.sort((a, b) => {
 			const distance =
 				distanceFromRange(a, cursorLine0) - distanceFromRange(b, cursorLine0);
@@ -180,7 +195,7 @@ export function formatSymbolOutline(
 		lines.push(`active_symbol: ${resolvedActive.path}`);
 	}
 	if (selected.length > 0) {
-		lines.push("nearby_functions:");
+		lines.push("nearby_symbols:");
 		for (const entry of selected) {
 			const detail =
 				entry.detail !== "" && !entry.path.includes(entry.detail)
@@ -208,7 +223,7 @@ function rangeContainsLine(range: RangeLike, line: number): boolean {
 	return range.start.line <= line && line <= range.end.line;
 }
 
-function distanceFromRange(entry: CallableEntry, line: number): number {
+function distanceFromRange(entry: OutlineEntry, line: number): number {
 	if (line < entry.startLine) return entry.startLine - line;
 	if (line > entry.endLine) return line - entry.endLine;
 	return 0;

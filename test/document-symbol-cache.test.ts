@@ -120,11 +120,26 @@ describe("ApiClient Document Symbols cache", () => {
 		expect(calls).toBe(1);
 	});
 
-	test("keeps the last complete snapshot while the document is dirty", async () => {
+	test("seeds an outline for a document that is already dirty", async () => {
+		const { internals } = makeClient({
+			documentSymbolLoader: () => Promise.resolve([symbol("dirty")]),
+		});
+		const document = makeDocument(1, true);
+
+		expect(
+			internals.getDocumentSymbols(document as vscode.TextDocument),
+		).toEqual([]);
+		await flushPromises();
+		expect(
+			internals.getDocumentSymbols(document as vscode.TextDocument)[0]?.name,
+		).toBe("dirty");
+	});
+
+	test("refreshes the outline for a resolved dirty document version", async () => {
 		setOutlineSymbols(8);
 		const loads = [[symbol("before")], [symbol("after")]];
 		let calls = 0;
-		const { client, internals } = makeClient({
+		const { internals } = makeClient({
 			documentSymbolLoader: () => Promise.resolve(loads[calls++]),
 		});
 		const document = makeDocument();
@@ -140,15 +155,11 @@ describe("ApiClient Document Symbols cache", () => {
 		expect(
 			internals.getDocumentSymbols(document as vscode.TextDocument)[0]?.name,
 		).toBe("before");
-		expect(calls).toBe(1);
-
-		document.isDirty = false;
-		client.handleDocumentSaved(document as vscode.TextDocument);
+		expect(calls).toBe(2);
 		await flushPromises();
 		expect(
 			internals.getDocumentSymbols(document as vscode.TextDocument)[0]?.name,
 		).toBe("after");
-		expect(calls).toBe(2);
 	});
 
 	test("ignores a provider result for an obsolete document version", async () => {
@@ -159,7 +170,9 @@ describe("ApiClient Document Symbols cache", () => {
 		const { internals } = makeClient({
 			documentSymbolLoader: () => {
 				calls++;
-				return first.promise;
+				return calls === 1
+					? first.promise
+					: Promise.resolve([symbol("current")]);
 			},
 		});
 		const document = makeDocument();
@@ -173,7 +186,11 @@ describe("ApiClient Document Symbols cache", () => {
 		expect(
 			internals.getDocumentSymbols(document as vscode.TextDocument),
 		).toEqual([]);
-		expect(calls).toBe(1);
+		expect(calls).toBe(2);
+		await flushPromises();
+		expect(
+			internals.getDocumentSymbols(document as vscode.TextDocument)[0]?.name,
+		).toBe("current");
 	});
 
 	test("a timed-out provider remains single-flight and cannot block callers", async () => {

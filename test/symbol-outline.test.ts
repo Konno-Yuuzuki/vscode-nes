@@ -75,10 +75,37 @@ describe("formatSymbolOutline", () => {
 		expect(outline).toContain("fn4");
 		expect(outline).toContain("fn5");
 		expect(outline).not.toContain("fn1");
-		const nearby = outline.slice(outline.indexOf("nearby_functions:"));
+		const nearby = outline.slice(outline.indexOf("nearby_symbols:"));
 		expect(nearby.indexOf("fn2")).toBeLessThan(nearby.indexOf("fn3"));
 		expect(nearby.indexOf("fn3")).toBeLessThan(nearby.indexOf("fn4"));
 		expect(nearby.indexOf("fn4")).toBeLessThan(nearby.indexOf("fn5"));
+	});
+
+	test("includes nearby non-callable symbols within the configured budget", () => {
+		const symbols: DocumentSymbolLike[] = [
+			{
+				name: "CVehicleModelInfo",
+				kind: 4,
+				range: range(10, 200),
+				children: [
+					{
+						name: "wheelCount",
+						kind: 7,
+						range: range(30, 30),
+					},
+					{
+						name: "MAX_WHEELS",
+						kind: 21,
+						range: range(40, 40),
+					},
+				],
+			},
+		];
+
+		const outline = formatSymbolOutline(symbols, 35, 32);
+		expect(outline).toContain("nearby_symbols:");
+		expect(outline).toContain("CVehicleModelInfo::wheelCount");
+		expect(outline).toContain("CVehicleModelInfo::MAX_WHEELS");
 	});
 
 	test("supports flat SymbolInformation providers", () => {
@@ -96,7 +123,7 @@ describe("formatSymbolOutline", () => {
 		expect(outline).toBe(
 			[
 				"active_symbol: Renderer::render",
-				"nearby_functions:",
+				"nearby_symbols:",
 				"- line 101: Renderer::render [active]",
 			].join("\n"),
 		);

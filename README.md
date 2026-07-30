@@ -44,7 +44,7 @@ latency — is removed.
 | `sweep.modelName` | `sweepai/sweep-next-edit` | `model` field in the request body; substring-matched to pick the prompt format |
 | `sweep.completionTimeoutMs` | `10000` | Per-request timeout (ms) |
 | `sweep.maxContextFiles` | `5` | Related excerpt cap; Zeta prioritizes LSP retrieval, then visible/recent buffers |
-| `sweep.outlineSymbols` | `0` | Optional nearby LSP functions/methods plus the active symbol path for every model; asynchronous and separate from `maxContextFiles`, a positive value opts in |
+| `sweep.outlineSymbols` | `0` | Optional nearby LSP symbols plus the active symbol path for every model. Includes methods, fields, enum members, and globals when provided; asynchronous and separate from `maxContextFiles`, a positive value opts in |
 | `sweep.maxRecentChangesChars` | `12000` | Character budget for formatted recent-edit history; `0` disables history |
 | `sweep.includeClipboardContext` | `true` | Include clipboard text as retrieval context; it is emitted last in retrieval |
 | `sweep.stableRetrievalOrdering` | `false` | Sort retrieval chunks deterministically to improve prefix-cache reuse |

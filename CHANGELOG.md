@@ -2,6 +2,10 @@
 
 Notable NESweep fork changes are documented here, starting from the fork point at `v0.5.0-fork.1`.
 
+## Unreleased
+
+- Made `sweep.outlineSymbols` a true nearby-symbol budget: Zeta/Sweep outlines now include useful fields, enum members, globals, and containers in addition to functions/methods, and refresh with a provider-resolved outline for dirty document versions.
+
 ## 1.2.6 - 2026-07-30
 
 - Improved Sweep prompt-prefix cache reuse: retained chronological recent edits while evicting the oldest entries first, omitted active-file history already covered by the broad context, and moved volatile retrieval, outline, and diagnostics after active-file context.

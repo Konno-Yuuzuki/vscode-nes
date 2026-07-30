@@ -43,7 +43,7 @@ latency — is removed.
 | `sweep.serverUrl` | `http://localhost:8080` | `/v1/completions` base URL |
 | `sweep.modelName` | `sweepai/sweep-next-edit` | `model` field in the request body; substring-matched to pick the prompt format |
 | `sweep.completionTimeoutMs` | `10000` | Per-request timeout (ms) |
-| `sweep.retriggerOnContextExit` | `false` | Opt in to requesting a completion when cursor navigation exits the last model editable window, even with no text edit |
+| `sweep.retriggerOnContextExit` | `false` | Opt in to requesting a completion after the cursor moves at least half the last model editable window, even with no text edit |
 | `sweep.contextExitRetriggerDebounceMs` | `1500` | Debounce for context-exit cursor retriggers, allowing navigation to settle; `0` uses the next event-loop turn |
 | `sweep.maxContextFiles` | `5` | Related excerpt cap; Zeta prioritizes LSP retrieval, then visible/recent buffers |
 | `sweep.outlineSymbols` | `0` | Optional nearby LSP symbols plus the active symbol path for every model. Includes methods, fields, enum members, and globals when provided; asynchronous and separate from `maxContextFiles`, a positive value opts in |

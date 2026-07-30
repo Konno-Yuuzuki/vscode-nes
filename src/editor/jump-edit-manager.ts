@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 
 import type { AutocompleteResult } from "~/api/schemas.ts";
+import { JUMP_RETRIGGER_DELAY_MS } from "~/core/constants.ts";
 import { logger } from "~/core/logger.ts";
 import {
 	classifyEditDisplay,
@@ -515,6 +516,25 @@ export class JumpEditManager implements vscode.Disposable {
 		}
 
 		this.clearJumpEdit();
+		if (success) {
+			// editor.edit() applies the model change but VS Code does not always
+			// invoke inline completion again after we move the cursor to its next
+			// target. Wait for the edit and selection events to settle, then ask
+			// for the following prediction explicitly.
+			setTimeout(() => {
+				const activeEditor = vscode.window.activeTextEditor;
+				if (
+					!activeEditor ||
+					activeEditor.document.uri.toString() !== pendingJumpEdit.uri
+				) {
+					return;
+				}
+				logger.debug("Retriggering after accepted jump edit");
+				void vscode.commands.executeCommand(
+					"editor.action.inlineSuggest.trigger",
+				);
+			}, JUMP_RETRIGGER_DELAY_MS);
+		}
 	}
 
 	dismissJumpEdit(): void {

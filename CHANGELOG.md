@@ -4,8 +4,11 @@ Notable NESweep fork changes are documented here, starting from the fork point a
 
 ## Unreleased
 
+## 1.2.7 - 2026-07-30
+
 - Made `sweep.outlineSymbols` a true nearby-symbol budget: Zeta/Sweep outlines now include useful fields, enum members, globals, and containers in addition to functions/methods, and refresh with a provider-resolved outline for dirty document versions.
-- Added debounced cursor-context retriggers: a fresh completion is requested after the cursor exits the last model editable window, even without a text edit.
+- Added debounced cursor-context retriggers: a fresh completion is requested after the cursor moves at least half the prior editable window, even without a text edit.
+- Preserved Copilot-style proposed inline edits after VS Code navigates to an off-screen edit target, recognized its preceding-line landing anchor, and automatically requested the next completion there.
 
 ## 1.2.6 - 2026-07-30
 

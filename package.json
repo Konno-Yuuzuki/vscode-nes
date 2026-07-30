@@ -2,7 +2,7 @@
 	"name": "nesweep",
 	"displayName": "NESweep autocompletion",
 	"description": "Next Edit Autocomplete using Sweep Model",
-	"version": "1.2.6",
+	"version": "1.2.7",
 	"publisher": "SR-team",
 	"author": {
 		"name": "SR_team"
@@ -257,14 +257,14 @@
 						"type": "boolean",
 						"default": false,
 						"order": 45,
-						"markdownDescription": "Request a fresh next-edit completion after the cursor leaves the editable line window used by the last model request, even when the document text did not change. This keeps cursor navigation responsive for next-edit models. The request is debounced by `#sweep.contextExitRetriggerDebounceMs#`."
+						"markdownDescription": "Request a fresh next-edit completion after the cursor moves at least half the height of the editable line window used by the last model request, even when the document text did not change. This keeps cursor navigation responsive for next-edit models without firing for small navigation steps. The request is debounced by `#sweep.contextExitRetriggerDebounceMs#`."
 					},
 					"sweep.contextExitRetriggerDebounceMs": {
 						"type": "number",
 						"default": 1500,
 						"minimum": 0,
 						"order": 46,
-						"markdownDescription": "Delay in milliseconds before requesting a completion after the cursor leaves the previous editable context window. Further cursor movement resets the timer; `0` requests on the next event-loop turn. Default `1500`, allowing normal editor navigation to settle before inference."
+						"markdownDescription": "Delay in milliseconds before requesting a completion after the cursor has moved at least half the previous editable context window. Further cursor movement resets the timer; `0` requests on the next event-loop turn. Default `1500`, allowing normal editor navigation to settle before inference."
 					},
 					"sweep.diagRadius": {
 						"type": "number",

@@ -20,6 +20,9 @@ export const DEFAULT_COMPLETION_TIMEOUT_MS = 10_000;
 // configurable from VS Code's normal typing-trigger debounce.
 export const DEFAULT_RETRIGGER_ON_CONTEXT_EXIT = false;
 export const DEFAULT_CONTEXT_EXIT_RETRIGGER_DEBOUNCE_MS = 1_500;
+// Give VS Code a moment to finish its native "Tab to jump" cursor move
+// before asking the inline provider for the next edit at that target.
+export const JUMP_RETRIGGER_DELAY_MS = 100;
 // Drop diagnostics whose line is more than this many lines from the cursor.
 // VSCode hands us the entire file's diagnostic set per request; keeping all
 // of them dominates the prompt for files with a chatty linter.

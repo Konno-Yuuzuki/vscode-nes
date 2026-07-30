@@ -12,11 +12,15 @@ import {
 import type { JumpEditManager } from "~/editor/jump-edit-manager.ts";
 import type { DocumentTracker } from "~/telemetry/document-tracker.ts";
 
-function makeOneLineDocument(text: string, version = 1): vscode.TextDocument {
+function makeOneLineDocument(
+	text: string,
+	version = 1,
+	lineCount = 1,
+): vscode.TextDocument {
 	return {
 		uri: { toString: () => "file:///test.ts" },
 		version,
-		lineCount: 1,
+		lineCount,
 		lineAt: () => ({ text }),
 		getText: (range?: vscode.Range) => {
 			if (!range) return text;
@@ -161,12 +165,14 @@ describe("InlineEditProvider cursor context retrigger", () => {
 			retriggerOnContextExit: true,
 			contextExitRetriggerDebounceMs: 0,
 		});
-		const document = makeOneLineDocument("const value = 1;");
-		const exitPosition = new vscode.Position(8, 0);
-		setActiveTextEditor({
+		const document = makeOneLineDocument("const value = 1;", 1, 10);
+		const nearPosition = new vscode.Position(4, 0);
+		const exitPosition = new vscode.Position(5, 0);
+		const editor = {
 			document,
-			selection: new vscode.Selection(exitPosition, exitPosition),
-		} as vscode.TextEditor);
+			selection: new vscode.Selection(nearPosition, nearPosition),
+		} as vscode.TextEditor;
+		setActiveTextEditor(editor);
 
 		const commands = vscode.commands as unknown as {
 			executeCommand: (...args: unknown[]) => Promise<unknown>;
@@ -184,8 +190,13 @@ describe("InlineEditProvider cursor context retrigger", () => {
 				{} as ApiClient,
 			);
 			// The first movement establishes a baseline context; no model result
-			// is required. The second movement exits it and schedules inference.
+			// is required. A 10-line window uses a 5-line trigger threshold.
 			await provider.handleCursorMove(document, new vscode.Position(0, 0));
+			await provider.handleCursorMove(document, nearPosition);
+			await Bun.sleep(5);
+			expect(triggered).toEqual([]);
+
+			editor.selection = new vscode.Selection(exitPosition, exitPosition);
 			await provider.handleCursorMove(document, exitPosition);
 			await Bun.sleep(5);
 			expect(triggered).toEqual(["editor.action.inlineSuggest.trigger"]);

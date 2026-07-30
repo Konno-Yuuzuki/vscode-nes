@@ -5,6 +5,7 @@ import type { AutocompleteResult } from "~/api/schemas.ts";
 import { selectSweepEditWindow } from "~/api/sweep-prompt.ts";
 import { selectZetaCursorWindowFromLineProvider } from "~/api/zeta2-prompt.ts";
 import { config } from "~/core/config";
+import { JUMP_RETRIGGER_DELAY_MS } from "~/core/constants.ts";
 import { logger } from "~/core/logger.ts";
 import type { JumpEditManager } from "~/editor/jump-edit-manager.ts";
 import {
@@ -45,8 +46,15 @@ interface EditableContextWindow {
 	version: number;
 	startLine: number;
 	endLine: number;
+	anchorLine: number;
 	retriggered: boolean;
 	timer?: ReturnType<typeof setTimeout>;
+}
+
+interface PendingProposedJump {
+	uri: string;
+	version: number;
+	targetLine: number;
 }
 
 export interface AcceptedInlineSuggestion {
@@ -298,6 +306,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 	} | null = null;
 	private lastRequestTimestamp = 0;
 	private editableContextWindow: EditableContextWindow | null = null;
+	private pendingProposedJump: PendingProposedJump | null = null;
 
 	constructor(
 		tracker: DocumentTracker,
@@ -868,6 +877,22 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 				? toSnippetWithCursor(result.completion, result.cursorTargetOffset)
 				: result.completion;
 		const item = new vscode.InlineCompletionItem(insertText, editRange);
+		if (
+			useProposedInlineEditPresentation &&
+			startPosition.line !== position.line
+		) {
+			this.pendingProposedJump = {
+				uri: document.uri.toString(),
+				version: document.version,
+				targetLine: startPosition.line,
+			};
+			logger.debug("Watching proposed jump target", {
+				targetLine: startPosition.line,
+				originLine: position.line,
+			});
+		} else {
+			this.pendingProposedJump = null;
+		}
 		const replacedText = document.getText(editRange);
 		if (replacedText && !result.completion.startsWith(replacedText)) {
 			item.filterText = replacedText;
@@ -930,14 +955,69 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 			version: snapshot.version,
 			startLine,
 			endLine,
+			anchorLine: snapshot.position.line,
 			retriggered: false,
 		};
 		logger.debug("Remembered editable context window", {
 			startLine,
 			endLine,
-			requestLine: snapshot.position.line,
+			anchorLine: snapshot.position.line,
 			version: snapshot.version,
 		});
+	}
+
+	private maybeRetriggerAfterProposedJump(
+		document: vscode.TextDocument,
+		position: vscode.Position,
+	): boolean {
+		const jump = this.pendingProposedJump;
+		if (!jump) return false;
+		if (
+			jump.uri !== document.uri.toString() ||
+			jump.version !== document.version
+		) {
+			this.pendingProposedJump = null;
+			return false;
+		}
+		// The proposed-API "Tab to jump" landing point is normally the edit
+		// line, but VS Code can land one line before an insertion (the range's
+		// visual anchor). Treat either line as arrival. A strict target-line
+		// comparison loses the suggestion without ever requesting the next one.
+		const isAtJumpTarget =
+			position.line >= Math.max(0, jump.targetLine - 1) &&
+			position.line <= jump.targetLine;
+		if (!isAtJumpTarget) return false;
+		const landingLine = position.line;
+
+		// Native proposed inline edits use Tab/click to move to a distant edit.
+		// They do not apply the edit or necessarily re-invoke our provider at
+		// that target. Consume the one-shot watcher before scheduling so
+		// selection events cannot enqueue duplicate requests.
+		this.pendingProposedJump = null;
+		logger.debug("Proposed jump reached target; scheduling next edit", {
+			targetLine: jump.targetLine,
+			landingLine,
+			delayMs: JUMP_RETRIGGER_DELAY_MS,
+		});
+		setTimeout(() => {
+			const editor = vscode.window.activeTextEditor;
+			if (
+				!editor ||
+				editor.document.uri.toString() !== jump.uri ||
+				editor.document.version !== jump.version ||
+				editor.selection.active.line !== landingLine
+			) {
+				return;
+			}
+			logger.debug("Retriggering after proposed jump", {
+				targetLine: jump.targetLine,
+				landingLine,
+			});
+			void vscode.commands.executeCommand(
+				"editor.action.inlineSuggest.trigger",
+			);
+		}, JUMP_RETRIGGER_DELAY_MS);
+		return true;
 	}
 
 	private maybeRetriggerOnEditableContextExit(
@@ -964,9 +1044,12 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 			return;
 		}
 
-		const isInside =
-			position.line >= window.startLine && position.line < window.endLine;
-		if (isInside) {
+		const retriggerDistance = Math.max(
+			1,
+			Math.ceil((window.endLine - window.startLine) / 2),
+		);
+		const movedLines = Math.abs(position.line - window.anchorLine);
+		if (movedLines < retriggerDistance) {
 			if (window.timer) {
 				clearTimeout(window.timer);
 				delete window.timer;
@@ -976,10 +1059,13 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		if (!config.retriggerOnContextExit || window.retriggered) return;
 
 		if (window.timer) clearTimeout(window.timer);
-		logger.debug("Cursor left editable context; scheduling retrigger", {
+		logger.debug("Cursor crossed editable-context retrigger threshold", {
 			startLine: window.startLine,
 			endLine: window.endLine,
+			anchorLine: window.anchorLine,
 			currentLine: position.line,
+			movedLines,
+			retriggerDistance,
 			debounceMs: config.contextExitRetriggerDebounceMs,
 		});
 		window.timer = setTimeout(() => {
@@ -996,17 +1082,26 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 				return;
 			}
 			const currentLine = editor.selection.active.line;
-			if (currentLine >= window.startLine && currentLine < window.endLine) {
-				return;
-			}
+			const retriggerDistance = Math.max(
+				1,
+				Math.ceil((window.endLine - window.startLine) / 2),
+			);
+			const movedLines = Math.abs(currentLine - window.anchorLine);
+			if (movedLines < retriggerDistance) return;
 
 			window.retriggered = true;
-			logger.debug("Retriggering after cursor left editable context", {
-				startLine: window.startLine,
-				endLine: window.endLine,
-				currentLine,
-				debounceMs: config.contextExitRetriggerDebounceMs,
-			});
+			logger.debug(
+				"Retriggering after cursor crossed editable-context threshold",
+				{
+					startLine: window.startLine,
+					endLine: window.endLine,
+					anchorLine: window.anchorLine,
+					currentLine,
+					movedLines,
+					retriggerDistance,
+					debounceMs: config.contextExitRetriggerDebounceMs,
+				},
+			);
 			void vscode.commands.executeCommand(
 				"editor.action.inlineSuggest.trigger",
 			);
@@ -1024,6 +1119,10 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		document: vscode.TextDocument,
 		position: vscode.Position,
 	): Promise<void> {
+		const arrivedAtProposedJump = this.maybeRetriggerAfterProposedJump(
+			document,
+			position,
+		);
 		this.maybeRetriggerOnEditableContextExit(document, position);
 
 		if (
@@ -1034,6 +1133,11 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		}
 
 		if (!this.lastInlineEdit) return;
+		// A distant proposed inline edit uses VS Code's first Tab/click as a
+		// navigation step. Do not call inlineSuggest.hide for that movement:
+		// it destroys the still-pending native suggestion before its second
+		// acceptance step (and before the automatic refresh above can arrive).
+		if (arrivedAtProposedJump) return;
 		const currentUri = document.uri.toString();
 		if (currentUri !== this.lastInlineEdit.uri) {
 			logger.debug("Clearing inline edit: active document changed");

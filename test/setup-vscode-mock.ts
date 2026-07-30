@@ -100,6 +100,7 @@ mock.module("vscode", () => ({
 			this.value = value;
 		}
 	},
+	InlineCompletionTriggerKind: { Invoke: 0, Automatic: 1 },
 	InlineCompletionItem: class {
 		filterText?: string;
 		command?: unknown;

@@ -3,12 +3,14 @@ import * as vscode from "vscode";
 
 import {
 	DEFAULT_COMPLETION_TIMEOUT_MS,
+	DEFAULT_CONTEXT_EXIT_RETRIGGER_DEBOUNCE_MS,
 	DEFAULT_DIAG_RADIUS,
 	DEFAULT_EDITABLE_TOKENS,
 	DEFAULT_MAX_CONTEXT_FILES,
 	DEFAULT_MAX_EDIT_HISTORY,
 	DEFAULT_MAX_RECENT_CHANGES_CHARS,
 	DEFAULT_OUTLINE_SYMBOLS,
+	DEFAULT_RETRIGGER_ON_CONTEXT_EXIT,
 	DEFAULT_RULES_MAX_CHARS,
 	DEFAULT_SERVER_URL,
 	DEFAULT_ZETA_CONTEXT_TOKENS,
@@ -100,6 +102,20 @@ export class SweepConfig {
 		return this.config.get<number>(
 			"completionTimeoutMs",
 			DEFAULT_COMPLETION_TIMEOUT_MS,
+		);
+	}
+
+	get retriggerOnContextExit(): boolean {
+		return this.config.get<boolean>(
+			"retriggerOnContextExit",
+			DEFAULT_RETRIGGER_ON_CONTEXT_EXIT,
+		);
+	}
+
+	get contextExitRetriggerDebounceMs(): number {
+		return this.nonNegativeInteger(
+			"contextExitRetriggerDebounceMs",
+			DEFAULT_CONTEXT_EXIT_RETRIGGER_DEBOUNCE_MS,
 		);
 	}
 

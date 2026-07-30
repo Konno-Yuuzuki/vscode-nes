@@ -122,10 +122,9 @@ export function buildSweepPrompt(
 		req.cursor_position,
 	);
 
-	const windowStartLine = Math.max(0, cursorLine - WINDOW_LINES_BEFORE);
-	const windowEndLine = Math.min(
+	const { start: windowStartLine, end: windowEndLine } = selectSweepEditWindow(
 		lines.length,
-		cursorLine + WINDOW_LINES_AFTER + 1,
+		cursorLine,
 	);
 
 	// `lines` (and lineOffsets) reflect the actual document — the response
@@ -367,6 +366,20 @@ function relativeCursorByte(
 		off += Buffer.byteLength(lines[i] ?? "", "utf8") + 1;
 	}
 	return off + cursorCol;
+}
+
+export function selectSweepEditWindow(
+	lineCount: number,
+	cursorLine: number,
+): { start: number; end: number } {
+	const boundedCursor = Math.min(
+		Math.max(0, cursorLine),
+		Math.max(0, lineCount - 1),
+	);
+	return {
+		start: Math.max(0, boundedCursor - WINDOW_LINES_BEFORE),
+		end: Math.min(lineCount, boundedCursor + WINDOW_LINES_AFTER + 1),
+	};
 }
 
 export function selectSweepBroadWindow(

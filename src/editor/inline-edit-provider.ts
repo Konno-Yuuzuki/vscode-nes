@@ -1,6 +1,9 @@
 import * as vscode from "vscode";
 import type { ApiClient, AutocompleteInput } from "~/api/client.ts";
+import { detectModelFormat } from "~/api/model-format.ts";
 import type { AutocompleteResult } from "~/api/schemas.ts";
+import { selectSweepEditWindow } from "~/api/sweep-prompt.ts";
+import { selectZetaCursorWindowFromLineProvider } from "~/api/zeta2-prompt.ts";
 import { config } from "~/core/config";
 import { logger } from "~/core/logger.ts";
 import type { JumpEditManager } from "~/editor/jump-edit-manager.ts";
@@ -35,6 +38,15 @@ interface RequestSnapshot {
 	position: vscode.Position;
 	content: string;
 	cursorOffset: number;
+}
+
+interface EditableContextWindow {
+	uri: string;
+	version: number;
+	startLine: number;
+	endLine: number;
+	retriggered: boolean;
+	timer?: ReturnType<typeof setTimeout>;
 }
 
 export interface AcceptedInlineSuggestion {
@@ -285,6 +297,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		response: Promise<AutocompleteResult[] | null>;
 	} | null = null;
 	private lastRequestTimestamp = 0;
+	private editableContextWindow: EditableContextWindow | null = null;
 
 	constructor(
 		tracker: DocumentTracker,
@@ -342,7 +355,16 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 			return undefined;
 		}
 
-		if (currentContent === originalContent) return undefined;
+		// Normal automatic suggestions require an edit. Context-exit retriggers
+		// invoke VS Code's inline-suggest command explicitly, and their purpose
+		// is precisely to ask for a next edit at a new cursor location even when
+		// the document bytes are unchanged.
+		if (
+			currentContent === originalContent &&
+			context.triggerKind !== vscode.InlineCompletionTriggerKind.Invoke
+		) {
+			return undefined;
+		}
 		if (this.shouldConsumeQueuedSuggestion) {
 			const queuedItems = this.consumeQueuedSuggestion(document, position);
 			if (queuedItems) {
@@ -358,6 +380,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 
 		const setupOriginate = (): Promise<AutocompleteResult[] | null> => {
 			this.cancelInFlightRequest("superseded by new request");
+			this.rememberEditableContextWindow(document, requestSnapshot);
 			const controller = new AbortController();
 			const input = this.buildInput(document, position, originalContent);
 			const promise = this.api.getAutocomplete(input, controller.signal);
@@ -874,10 +897,135 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		return enableForwardStability({ items: [item] });
 	}
 
+	private rememberEditableContextWindow(
+		document: vscode.TextDocument,
+		snapshot: Pick<RequestSnapshot, "uri" | "version" | "position">,
+	): void {
+		const format = detectModelFormat(config.modelName);
+		let startLine: number;
+		let endLine: number;
+		if (format === "sweep") {
+			const window = selectSweepEditWindow(
+				document.lineCount,
+				snapshot.position.line,
+			);
+			startLine = window.start;
+			endLine = window.end;
+		} else {
+			const window = selectZetaCursorWindowFromLineProvider(
+				document.lineCount,
+				snapshot.position.line,
+				config.editableTokens,
+				config.zetaContextTokens,
+				(line) => document.lineAt(line).text,
+			);
+			startLine = window.editableStart;
+			endLine = window.editableEnd;
+		}
+		if (endLine <= startLine) return;
+
+		this.clearEditableContextWindow();
+		this.editableContextWindow = {
+			uri: snapshot.uri,
+			version: snapshot.version,
+			startLine,
+			endLine,
+			retriggered: false,
+		};
+		logger.debug("Remembered editable context window", {
+			startLine,
+			endLine,
+			requestLine: snapshot.position.line,
+			version: snapshot.version,
+		});
+	}
+
+	private maybeRetriggerOnEditableContextExit(
+		document: vscode.TextDocument,
+		position: vscode.Position,
+	): void {
+		const window = this.editableContextWindow;
+		const anchor = {
+			uri: document.uri.toString(),
+			version: document.version,
+			position,
+		};
+		if (!window) {
+			if (config.retriggerOnContextExit) {
+				this.rememberEditableContextWindow(document, anchor);
+			}
+			return;
+		}
+		if (window.uri !== anchor.uri || window.version !== anchor.version) {
+			this.clearEditableContextWindow();
+			if (config.retriggerOnContextExit) {
+				this.rememberEditableContextWindow(document, anchor);
+			}
+			return;
+		}
+
+		const isInside =
+			position.line >= window.startLine && position.line < window.endLine;
+		if (isInside) {
+			if (window.timer) {
+				clearTimeout(window.timer);
+				delete window.timer;
+			}
+			return;
+		}
+		if (!config.retriggerOnContextExit || window.retriggered) return;
+
+		if (window.timer) clearTimeout(window.timer);
+		logger.debug("Cursor left editable context; scheduling retrigger", {
+			startLine: window.startLine,
+			endLine: window.endLine,
+			currentLine: position.line,
+			debounceMs: config.contextExitRetriggerDebounceMs,
+		});
+		window.timer = setTimeout(() => {
+			if (this.editableContextWindow !== window) return;
+			delete window.timer;
+
+			const editor = vscode.window.activeTextEditor;
+			if (
+				!editor ||
+				editor.document.uri.toString() !== window.uri ||
+				editor.document.version !== window.version
+			) {
+				this.clearEditableContextWindow();
+				return;
+			}
+			const currentLine = editor.selection.active.line;
+			if (currentLine >= window.startLine && currentLine < window.endLine) {
+				return;
+			}
+
+			window.retriggered = true;
+			logger.debug("Retriggering after cursor left editable context", {
+				startLine: window.startLine,
+				endLine: window.endLine,
+				currentLine,
+				debounceMs: config.contextExitRetriggerDebounceMs,
+			});
+			void vscode.commands.executeCommand(
+				"editor.action.inlineSuggest.trigger",
+			);
+		}, config.contextExitRetriggerDebounceMs);
+	}
+
+	private clearEditableContextWindow(): void {
+		if (this.editableContextWindow?.timer) {
+			clearTimeout(this.editableContextWindow.timer);
+		}
+		this.editableContextWindow = null;
+	}
+
 	async handleCursorMove(
 		document: vscode.TextDocument,
 		position: vscode.Position,
 	): Promise<void> {
+		this.maybeRetriggerOnEditableContextExit(document, position);
+
 		if (
 			this.queuedSuggestions &&
 			this.queuedSuggestions.uri !== document.uri.toString()

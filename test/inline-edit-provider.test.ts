@@ -16,6 +16,8 @@ function makeOneLineDocument(text: string, version = 1): vscode.TextDocument {
 	return {
 		uri: { toString: () => "file:///test.ts" },
 		version,
+		lineCount: 1,
+		lineAt: () => ({ text }),
 		getText: (range?: vscode.Range) => {
 			if (!range) return text;
 			const start = (range.start as vscode.Position).character;
@@ -24,7 +26,7 @@ function makeOneLineDocument(text: string, version = 1): vscode.TextDocument {
 		},
 		offsetAt: (position: vscode.Position) => position.character,
 		positionAt: (offset: number) => new vscode.Position(0, offset),
-	} as vscode.TextDocument;
+	} as unknown as vscode.TextDocument;
 }
 
 function buildItem(
@@ -151,6 +153,46 @@ afterEach(() => {
 	setMockConfiguration({});
 	setActiveTextEditor(undefined);
 	setVisibleTextEditors([]);
+});
+
+describe("InlineEditProvider cursor context retrigger", () => {
+	test("triggers once after a debounced exit from the editable window", async () => {
+		setMockConfiguration({
+			retriggerOnContextExit: true,
+			contextExitRetriggerDebounceMs: 0,
+		});
+		const document = makeOneLineDocument("const value = 1;");
+		const exitPosition = new vscode.Position(8, 0);
+		setActiveTextEditor({
+			document,
+			selection: new vscode.Selection(exitPosition, exitPosition),
+		} as vscode.TextEditor);
+
+		const commands = vscode.commands as unknown as {
+			executeCommand: (...args: unknown[]) => Promise<unknown>;
+		};
+		const originalExecuteCommand = commands.executeCommand;
+		const triggered: string[] = [];
+		commands.executeCommand = async (command: unknown) => {
+			if (typeof command === "string") triggered.push(command);
+		};
+
+		try {
+			const provider = new InlineEditProvider(
+				{} as DocumentTracker,
+				{} as JumpEditManager,
+				{} as ApiClient,
+			);
+			// The first movement establishes a baseline context; no model result
+			// is required. The second movement exits it and schedules inference.
+			await provider.handleCursorMove(document, new vscode.Position(0, 0));
+			await provider.handleCursorMove(document, exitPosition);
+			await Bun.sleep(5);
+			expect(triggered).toEqual(["editor.action.inlineSuggest.trigger"]);
+		} finally {
+			commands.executeCommand = originalExecuteCommand;
+		}
+	});
 });
 
 describe("InlineEditProvider buildCompletionItem", () => {

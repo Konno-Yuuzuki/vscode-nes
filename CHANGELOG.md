@@ -5,6 +5,7 @@ Notable NESweep fork changes are documented here, starting from the fork point a
 ## Unreleased
 
 - Made `sweep.outlineSymbols` a true nearby-symbol budget: Zeta/Sweep outlines now include useful fields, enum members, globals, and containers in addition to functions/methods, and refresh with a provider-resolved outline for dirty document versions.
+- Added debounced cursor-context retriggers: a fresh completion is requested after the cursor exits the last model editable window, even without a text edit.
 
 ## 1.2.6 - 2026-07-30
 

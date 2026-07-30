@@ -154,19 +154,27 @@ export function activate(context: vscode.ExtensionContext) {
 
 	const selectionChangeListener = vscode.window.onDidChangeTextEditorSelection(
 		(event) => {
-			if (event.textEditor === vscode.window.activeTextEditor) {
-				tracker.trackSelectionChange(
-					event.textEditor.document,
-					event.selections,
-				);
-				for (const selection of event.selections) {
-					tracker.trackCursorMovement(
-						event.textEditor.document,
-						selection.active,
-					);
-				}
-				handleCursorMove(event.textEditor);
+			// VS Code does not guarantee that the TextEditor object attached to a
+			// selection event is the same object instance as activeTextEditor.
+			// Compare documents instead; object-identity filtering drops genuine
+			// keyboard/mouse cursor moves and prevents context-exit retriggers.
+			const activeDocument = vscode.window.activeTextEditor?.document;
+			if (
+				!activeDocument ||
+				event.textEditor.document.uri.toString() !==
+					activeDocument.uri.toString()
+			) {
+				return;
 			}
+
+			tracker.trackSelectionChange(event.textEditor.document, event.selections);
+			for (const selection of event.selections) {
+				tracker.trackCursorMovement(
+					event.textEditor.document,
+					selection.active,
+				);
+			}
+			handleCursorMove(event.textEditor);
 		},
 	);
 

@@ -51,9 +51,7 @@ latency — is removed.
 | `sweep.reuseIdenticalPromptResults` | `false` | Reuse recent temperature-0 results for byte-identical prompts |
 | `sweep.identicalPromptCacheTtlMs` | `5000` | TTL for identical-prompt result reuse |
 | `sweep.diagRadius` | `12` | ±N lines around cursor; `0` disables |
-| `sweep.broadBefore` | `125` | Lines of broad context before cursor |
-| `sweep.broadAfter` | `75` | Lines of broad context after cursor |
-| `sweep.zetaEditableTokens` | `350` | Approximate editable budget; estimated as UTF-8 bytes / 3 and snapped to complete lines around the cursor |
+| `sweep.editableTokens` | `2000` | Shared approximate active-file budget, estimated as UTF-8 bytes / 3 and snapped to whole lines. Sweep allocates 2/3 before and 1/3 after the cursor; Zeta uses it for its editable excerpt. |
 | `sweep.zetaContextTokens` | `150` | Approximate additional Zeta-2.1 current-file context budget, using the same tokenizer-free estimate |
 | `sweep.rulesMaxChars` | `3000` | Soft cap on per-language workspace-rules file size; overflow surfaces as a diagnostic + red background in the editor |
 | `sweep.injectInlineDiagnostics` | `false` | Inline `BUG:` comments next to diagnosed lines in the prompt — recommended for 0.5B / 1.5B sweep checkpoints |

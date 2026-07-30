@@ -30,7 +30,7 @@
 //   <|file_sep|>context/diagnostics          omitted if no diagnostics
 //   Line N: [source] message
 //
-//   <|file_sep|>{path}                       broad file context (~300 lines)
+//   <|file_sep|>{path}                       token-budgeted broad file context
 //   {file body around cursor}
 //
 //   <|file_sep|>original/{path}:N:M          edit window, no marker
@@ -45,6 +45,10 @@
 // Stop tokens: <|file_sep|>, <|endoftext|>.
 
 import type { MessageTransform } from "~/core/config.ts";
+import {
+	DEFAULT_EDITABLE_TOKENS,
+	ESTIMATED_BYTES_PER_TOKEN,
+} from "~/core/constants.ts";
 import type { ModelPrompt } from "./model-format.ts";
 import type {
 	AutocompleteRequest,
@@ -59,12 +63,10 @@ const WINDOW_LINES_BEFORE = 30;
 const WINDOW_LINES_AFTER = 30;
 
 export interface SweepPromptOptions {
-	// Lines to keep before / after cursor in the <|file_sep|>{path}
-	// broad-context section. Cursortab hardcodes ±150 in its provider, but
-	// the section is informational only — the original/current/updated edit
-	// window is independent — so trimming here only reduces token pressure.
-	broadBefore: number;
-	broadAfter: number;
+	// Approximate total token budget for the <|file_sep|>{path} broad-context
+	// section. It is estimated as UTF-8 bytes / 3, line-aligned, and split
+	// 2/3 before vs. 1/3 after the cursor where possible.
+	editableTokens: number;
 	// Drop diagnostics whose line is more than this many lines from the
 	// cursor. 0 = no filter (keep all). cursortab forwards every LSP
 	// diagnostic on the file, which on chatty linters dominates the prompt.
@@ -98,8 +100,7 @@ export interface SweepPromptOptions {
 }
 
 const DEFAULT_OPTIONS: SweepPromptOptions = {
-	broadBefore: 125,
-	broadAfter: 75,
+	editableTokens: DEFAULT_EDITABLE_TOKENS,
 	diagRadius: 12,
 	rules: "",
 	commentPrefix: "//",
@@ -152,12 +153,14 @@ export function buildSweepPrompt(
 		if (!opts.rules.endsWith("\n")) body += "\n";
 	}
 
-	const broad = buildBroadContext(
+	const broadWindow = selectSweepBroadWindow(
 		promptLines,
 		cursorLine,
-		opts.broadBefore,
-		opts.broadAfter,
+		opts.editableTokens,
 	);
+	const broad = promptLines
+		.slice(broadWindow.start, broadWindow.end)
+		.join("\n");
 	const broadSection =
 		broad === "" ? "" : `<|file_sep|>${req.file_path}\n${broad}\n`;
 	const retrieval = formatRetrievalSection(
@@ -361,17 +364,63 @@ function relativeCursorByte(
 	return off + cursorCol;
 }
 
-function buildBroadContext(
+export function selectSweepBroadWindow(
 	lines: string[],
 	cursorLine: number,
-	before: number,
-	after: number,
-): string {
-	if (lines.length === 0) return "";
-	if (before <= 0 && after <= 0) return "";
-	const start = Math.max(0, cursorLine - before);
-	const end = Math.min(lines.length, cursorLine + after + 1);
-	return lines.slice(start, end).join("\n");
+	editableTokens: number,
+): { start: number; end: number } {
+	if (lines.length === 0 || editableTokens <= 0) {
+		return { start: 0, end: 0 };
+	}
+
+	const boundedCursor = Math.min(Math.max(0, cursorLine), lines.length - 1);
+	const totalBudget =
+		Math.max(1, Math.floor(editableTokens)) * ESTIMATED_BYTES_PER_TOKEN;
+	const beforeBudget = Math.floor((totalBudget * 2) / 3);
+	let start = boundedCursor;
+	let end = boundedCursor + 1;
+	let usedBefore = promptLineByteLength(lines, boundedCursor);
+	let usedTotal = usedBefore;
+
+	// Prefer the already-written code. The cursor line is included in this
+	// side because the broad section is line-aligned and cannot split it.
+	while (start > 0) {
+		const candidate = promptLineByteLength(lines, start - 1);
+		if (usedBefore + candidate > beforeBudget) break;
+		start--;
+		usedBefore += candidate;
+		usedTotal += candidate;
+	}
+
+	// If the beginning of the file (or a long line) prevents us from using the
+	// before allocation, release that unused budget to the after side.
+	const beforeIsExhausted = start === 0 || usedBefore < beforeBudget;
+	const afterBudget = beforeIsExhausted
+		? totalBudget - usedTotal
+		: totalBudget - beforeBudget;
+	let usedAfter = 0;
+	while (end < lines.length) {
+		const candidate = promptLineByteLength(lines, end);
+		if (usedAfter + candidate > afterBudget) break;
+		end++;
+		usedAfter += candidate;
+		usedTotal += candidate;
+	}
+
+	// At EOF, spend any unused after allocation on preceding context.
+	while (end === lines.length && start > 0) {
+		const candidate = promptLineByteLength(lines, start - 1);
+		if (usedTotal + candidate > totalBudget) break;
+		start--;
+		usedTotal += candidate;
+	}
+
+	return { start, end };
+}
+
+function promptLineByteLength(lines: string[], line: number): number {
+	const newlineBytes = line < lines.length - 1 ? 1 : 0;
+	return Buffer.byteLength(lines[line] ?? "", "utf8") + newlineBytes;
 }
 
 function formatRetrievalSection(

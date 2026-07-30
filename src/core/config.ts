@@ -2,10 +2,9 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 
 import {
-	DEFAULT_BROAD_AFTER,
-	DEFAULT_BROAD_BEFORE,
 	DEFAULT_COMPLETION_TIMEOUT_MS,
 	DEFAULT_DIAG_RADIUS,
+	DEFAULT_EDITABLE_TOKENS,
 	DEFAULT_MAX_CONTEXT_FILES,
 	DEFAULT_MAX_EDIT_HISTORY,
 	DEFAULT_MAX_RECENT_CHANGES_CHARS,
@@ -13,7 +12,6 @@ import {
 	DEFAULT_RULES_MAX_CHARS,
 	DEFAULT_SERVER_URL,
 	DEFAULT_ZETA_CONTEXT_TOKENS,
-	DEFAULT_ZETA_EDITABLE_TOKENS,
 	MODEL_NAME,
 } from "~/core/constants.ts";
 
@@ -109,21 +107,10 @@ export class SweepConfig {
 		return this.config.get<number>("diagRadius", DEFAULT_DIAG_RADIUS);
 	}
 
-	get broadBefore(): number {
-		return this.config.get<number>("broadBefore", DEFAULT_BROAD_BEFORE);
-	}
-
-	get broadAfter(): number {
-		return this.config.get<number>("broadAfter", DEFAULT_BROAD_AFTER);
-	}
-
-	get zetaEditableTokens(): number {
+	get editableTokens(): number {
 		return Math.max(
 			1,
-			this.nonNegativeInteger(
-				"zetaEditableTokens",
-				DEFAULT_ZETA_EDITABLE_TOKENS,
-			),
+			this.nonNegativeInteger("editableTokens", DEFAULT_EDITABLE_TOKENS),
 		);
 	}
 

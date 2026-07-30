@@ -49,10 +49,10 @@
 
 import type { MessageTransform } from "~/core/config.ts";
 import {
+	DEFAULT_EDITABLE_TOKENS,
 	DEFAULT_MAX_CONTEXT_FILES,
 	DEFAULT_ZETA_CONTEXT_TOKENS,
-	DEFAULT_ZETA_EDITABLE_TOKENS,
-	ZETA_ESTIMATED_BYTES_PER_TOKEN,
+	ESTIMATED_BYTES_PER_TOKEN,
 } from "~/core/constants.ts";
 import { utf8ByteOffsetToUtf16Offset } from "~/utils/text.ts";
 import type {
@@ -161,7 +161,7 @@ const DEFAULT_OPTIONS: Zeta2PromptOptions = {
 	inlineDiagnosticsMarker: "BUG: LSP error here",
 	messageTransforms: [],
 	protocolVersion: "2",
-	editableTokens: DEFAULT_ZETA_EDITABLE_TOKENS,
+	editableTokens: DEFAULT_EDITABLE_TOKENS,
 	contextTokens: DEFAULT_ZETA_CONTEXT_TOKENS,
 	maxRelatedChunks: DEFAULT_MAX_CONTEXT_FILES,
 };
@@ -212,7 +212,7 @@ export function selectZetaCursorWindowFromLineProvider(
 
 	const boundedCursorLine = Math.min(Math.max(0, cursorLine), lineCount - 1);
 	const editableBudgetBytes =
-		Math.max(1, Math.floor(editableTokens)) * ZETA_ESTIMATED_BYTES_PER_TOKEN;
+		Math.max(1, Math.floor(editableTokens)) * ESTIMATED_BYTES_PER_TOKEN;
 	const cursorLineBytes = linePromptByteLength(
 		lineCount,
 		getLine,
@@ -228,7 +228,7 @@ export function selectZetaCursorWindowFromLineProvider(
 	);
 
 	const contextBudgetBytes =
-		Math.max(0, Math.floor(contextTokens)) * ZETA_ESTIMATED_BYTES_PER_TOKEN;
+		Math.max(0, Math.floor(contextTokens)) * ESTIMATED_BYTES_PER_TOKEN;
 	const context = expandLineAlignedWindow(
 		lineCount,
 		getLine,

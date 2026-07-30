@@ -259,18 +259,6 @@
 						"order": 160,
 						"markdownDescription": "Drop LSP diagnostics whose line is more than this many lines from the cursor before they reach the prompt.\n\n- `0` disables the filter (every diagnostic on the file is kept, capped at 15 entries)\n- Default `12` matches cursortab's behaviour and keeps the diagnostics block compact."
 					},
-					"sweep.broadBefore": {
-						"type": "number",
-						"default": 125,
-						"order": 210,
-						"markdownDescription": "Lines of broad file context to keep **before** the cursor in the leading `<|file_sep|>{path}` section. Cursortab hardcodes ±150; the asymmetric default (125 before / 75 after) biases toward already-written code, where the model usually needs more context."
-					},
-					"sweep.broadAfter": {
-						"type": "number",
-						"default": 75,
-						"order": 220,
-						"markdownDescription": "Lines of broad file context to keep **after** the cursor in the leading `<|file_sep|>{path}` section. See `sweep.broadBefore` for the rationale behind the asymmetric default."
-					},
 					"sweep.rulesMaxChars": {
 						"type": "number",
 						"default": 3000,
@@ -307,15 +295,15 @@
 				}
 			},
 			{
-				"title": "NESweep: Zeta Context",
+				"title": "NESweep: Active File Context",
 				"order": 20,
 				"properties": {
-					"sweep.zetaEditableTokens": {
+					"sweep.editableTokens": {
 						"type": "number",
-						"default": 350,
+						"default": 2000,
 						"order": 10,
 						"minimum": 1,
-						"markdownDescription": "Approximate total token budget for the line-aligned editable excerpt used by Zeta-2 / Zeta-2.1. NESweep deliberately avoids a real tokenizer on VS Code's hot path: it estimates **1 token per 3 UTF-8 bytes**, starts with the cursor line, and grows the contiguous window in both directions while complete lines fit. Default `350` follows the Zeta V0318 provider profile."
+						"markdownDescription": "Approximate total token budget for the active current-file context. NESweep estimates **1 token per 3 UTF-8 bytes** and keeps complete lines. For Sweep, this controls the leading broad-context section with a **2/3 before cursor / 1/3 after cursor** target; unused budget is used on the available side at a file boundary. For Zeta-2 / Zeta-2.1, it controls the line-aligned editable excerpt. Default `2000`."
 					},
 					"sweep.zetaContextTokens": {
 						"type": "number",

@@ -96,11 +96,11 @@ export interface ApiClientOptions {
 	openDocumentsProvider?: () => readonly vscode.TextDocument[];
 }
 
-// Per-chunk retrieval truncation. Original Sweep used 200 lines against a
-// 150/150 broad window (≈2/3 of the broad-context budget); we keep the same
-// ratio so user-tuned sweep.broadBefore/broadAfter scales retrieval too.
+// Per-chunk retrieval truncation is derived from the shared active-file
+// budget. With the default 2,000 estimated tokens and roughly ten estimated
+// tokens per source line, this preserves the former 133-line cap.
 function retrievalChunkLines(): number {
-	return Math.floor(((config.broadBefore + config.broadAfter) * 2) / 3);
+	return Math.max(1, Math.floor(config.editableTokens / 15));
 }
 
 export function formatRecentChanges(
@@ -265,13 +265,12 @@ export class ApiClient {
 						inlineDiagnosticsMarker,
 						messageTransforms,
 						protocolVersion: format === "zeta2.1" ? "2.1" : "2",
-						editableTokens: config.zetaEditableTokens,
+						editableTokens: config.editableTokens,
 						contextTokens: config.zetaContextTokens,
 						maxRelatedChunks: config.maxContextFiles,
 					})
 				: buildSweepPrompt(parsedRequest.data, {
-						broadBefore: config.broadBefore,
-						broadAfter: config.broadAfter,
+						editableTokens: config.editableTokens,
 						diagRadius: config.diagRadius,
 						rules,
 						commentPrefix,
@@ -472,7 +471,7 @@ export class ApiClient {
 				? selectZetaCursorWindowFromLineProvider(
 						document.lineCount,
 						position.line,
-						config.zetaEditableTokens,
+						config.editableTokens,
 						config.zetaContextTokens,
 						(line) => document.lineAt(line).text,
 					)

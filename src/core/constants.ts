@@ -19,18 +19,13 @@ export const DEFAULT_COMPLETION_TIMEOUT_MS = 10_000;
 // VSCode hands us the entire file's diagnostic set per request; keeping all
 // of them dominates the prompt for files with a chatty linter.
 export const DEFAULT_DIAG_RADIUS = 12;
-// Asymmetric trim of the leading <|file_sep|>{path} broad-context section.
-// Cursortab hardcodes ±150; we bias behind the cursor where prediction
-// context typically lives.
-export const DEFAULT_BROAD_BEFORE = 125;
-export const DEFAULT_BROAD_AFTER = 75;
-// Zeta V0318's provider profile selects roughly 350 editable tokens plus
-// 150 surrounding-context tokens. NESweep deliberately avoids loading a
-// tokenizer into the extension host: the prompt builder estimates one token
-// per three UTF-8 bytes, then snaps the resulting excerpt to whole lines.
-export const DEFAULT_ZETA_EDITABLE_TOKENS = 350;
+// Shared current-file budget for Sweep's broad context and Zeta's editable
+// excerpt. NESweep deliberately avoids loading a tokenizer into the extension
+// host: prompt builders estimate one token per three UTF-8 bytes and retain
+// whole lines around the cursor.
+export const DEFAULT_EDITABLE_TOKENS = 2_000;
 export const DEFAULT_ZETA_CONTEXT_TOKENS = 150;
-export const ZETA_ESTIMATED_BYTES_PER_TOKEN = 3;
+export const ESTIMATED_BYTES_PER_TOKEN = 3;
 // Zed's V0318 provider sends at most six edit events. The client selects
 // the newest six and renders them chronologically so the previous prompt
 // remains a prefix while the history is still filling.

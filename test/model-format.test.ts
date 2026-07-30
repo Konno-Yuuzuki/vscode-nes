@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 
 import { detectModelFormat } from "~/api/model-format.ts";
 import type { AutocompleteRequest } from "~/api/schemas.ts";
-import { buildSweepPrompt } from "~/api/sweep-prompt.ts";
+import {
+	buildSweepPrompt,
+	selectSweepBroadWindow,
+} from "~/api/sweep-prompt.ts";
 import {
 	buildZeta2Prompt,
 	selectZetaCursorWindowFromLineProvider,
@@ -72,6 +75,16 @@ describe("buildSweepPrompt", () => {
 		expect(result.prompt).toContain("<|cursor|>");
 	});
 
+	test("uses a 2:1 before/after token budget for Sweep broad context", () => {
+		const lines = Array.from({ length: 100 }, () => "x".repeat(19));
+		const window = selectSweepBroadWindow(lines, 50, 30);
+
+		// 30 estimated tokens = 90 bytes. Each non-final line is 20 bytes,
+		// so two preceding lines plus the cursor line consume the 60-byte
+		// before allocation and one following line consumes the 30-byte tail.
+		expect(window).toEqual({ start: 48, end: 52 });
+	});
+
 	test("places active broad context after stable retrieval context", () => {
 		const result = buildSweepPrompt(
 			makeRequest({
@@ -139,6 +152,7 @@ describe("buildZeta2Prompt", () => {
 		const cursorPos = lines.slice(0, 50).join("\n").length + 1;
 		const result = buildZeta2Prompt(
 			makeRequest({ file_contents: fileContents, cursor_position: cursorPos }),
+			{ editableTokens: 350 },
 		);
 
 		// Ten complete 100-byte lines fit under 350 * 3 bytes. Starting
@@ -274,7 +288,7 @@ describe("buildZeta2Prompt", () => {
 					},
 				],
 			}),
-			{ protocolVersion: "2.1", maxRelatedChunks: 4 },
+			{ protocolVersion: "2.1", editableTokens: 350, maxRelatedChunks: 4 },
 		);
 
 		expect(result.prompt).not.toContain("overlapping current-file retrieval");

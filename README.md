@@ -69,17 +69,17 @@ Run any supported edit-prediction GGUF behind an OpenAI-compatible
 `/v1/completions` server. Examples with llama.cpp:
 
 ```sh
-# Sweep next-edit (default; 7B works without the inline-diagnostics hack)
-llama-server -hf sweepai/sweep-next-edit-7b-gguf --ctx-size 32768
+# Sweep Next Edit V2 7B
+llama-server -hf henrik3/sweep-next-edit-v2-7B-GGUF --ctx-size 32768
 
 # Sweep 1.5B (smaller, faster — turn on sweep.injectInlineDiagnostics)
-llama-server -hf sweepai/sweep-next-edit-1.5b-gguf --ctx-size 32768
+llama-server -hf sweepai/sweep-next-edit-1.5B --ctx-size 32768
 
 # Zeta-2 (Zed's SeedCoder-8B, single-region)
 llama-server -hf bartowski/zed-industries_zeta-2-GGUF --ctx-size 16384
 
 # Zeta-2.1 (Zed's SeedCoder-8B, multi-region)
-llama-server -hf bartowski/zed-industries_zeta-2.1-GGUF --ctx-size 16384
+llama-server -hf mradermacher/zeta-2.1-GGUF --ctx-size 16384
 ```
 
 Then point `sweep.modelName` at the right name. Detection rules:

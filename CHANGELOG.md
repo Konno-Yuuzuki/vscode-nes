@@ -2,6 +2,13 @@
 
 Notable NESweep fork changes are documented here, starting from the fork point at `v0.5.0-fork.1`.
 
+## 1.2.6 - 2026-07-30
+
+- Improved Sweep prompt-prefix cache reuse: retained chronological recent edits while evicting the oldest entries first, omitted active-file history already covered by the broad context, and moved volatile retrieval, outline, and diagnostics after active-file context.
+- Replaced separate Sweep/Zeta active-file context settings with `sweep.editableTokens` (`2000` by default); Sweep allocates it approximately 2:1 before/after the cursor.
+- In Copilot-style presentation, split disjoint same-line replacement hunks into sequential suggestions instead of rendering unchanged code between them as one large edit. Safely handle a final insertion and preserve a model-omitted trailing window tail.
+- Corrected the Hugging Face model repositories in the setup examples, including Zeta-2.1.
+
 ## 1.2.5 - 2026-07-29
 
 - Fixed extension-host freezes caused by opening LSP definition/reference targets as hidden VS Code documents, which could trigger hundreds of clangd CodeLens and semantic-token requests for large SDK headers.

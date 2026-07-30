@@ -4,6 +4,7 @@ import type { EditRecord } from "~/telemetry/document-tracker.ts";
 import {
 	MERGE_WINDOW_MS,
 	parseNewSideRange,
+	parseNewSideRanges,
 	rangesOverlap,
 	shouldCoalesce,
 } from "~/telemetry/edit-merger.ts";
@@ -34,6 +35,15 @@ describe("parseNewSideRange", () => {
 
 	test("returns null when no hunk header present", () => {
 		expect(parseNewSideRange("not a diff")).toBeNull();
+	});
+
+	test("returns every new-side hunk range", () => {
+		expect(
+			parseNewSideRanges("@@ -5 +7 @@\n-old\n+new\n@@ -20,2 +30,3 @@"),
+		).toEqual([
+			{ newStart: 7, newEnd: 7 },
+			{ newStart: 30, newEnd: 32 },
+		]);
 	});
 });
 

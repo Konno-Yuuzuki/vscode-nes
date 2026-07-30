@@ -85,7 +85,7 @@ describe("buildSweepPrompt", () => {
 		expect(window).toEqual({ start: 48, end: 52 });
 	});
 
-	test("places active broad context after stable retrieval context", () => {
+	test("places broad context before volatile retrieval, outline and diagnostics", () => {
 		const result = buildSweepPrompt(
 			makeRequest({
 				retrieval_chunks: [
@@ -108,10 +108,11 @@ describe("buildSweepPrompt", () => {
 		const active = result.prompt.indexOf("<|file_sep|>src/foo.ts");
 		const original = result.prompt.indexOf("<|file_sep|>original/src/foo.ts");
 		expect(retrieval).toBeGreaterThanOrEqual(0);
-		expect(diff).toBeGreaterThan(retrieval);
-		expect(outline).toBeGreaterThan(diff);
-		expect(active).toBeGreaterThan(outline);
-		expect(original).toBeGreaterThan(active);
+		expect(diff).toBeGreaterThanOrEqual(0);
+		expect(active).toBeGreaterThan(diff);
+		expect(retrieval).toBeGreaterThan(active);
+		expect(outline).toBeGreaterThan(retrieval);
+		expect(original).toBeGreaterThan(outline);
 		expect(result.contextStats?.outline).toBeGreaterThan(0);
 	});
 });

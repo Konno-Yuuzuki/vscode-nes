@@ -3,24 +3,27 @@
 // the Python uvx server in between.
 //
 // Prompt layout (single completion text fed to /v1/completions). Section
-// order is tuned for prefix-cache friendliness: rules (session-stable)
-// first, then sections that vary per cursor move / keystroke / LSP update,
-// with diagnostics last so the model sees them adjacent to the edit
-// window.
+// order is tuned for prefix-cache friendliness: rules and stable history
+// first, then current-file code. Retrieval, outline and diagnostics vary
+// with cursor movement / LSP updates, so they follow that active-file prefix
+// while still remaining adjacent to the final edit window.
 //
 //   <|file_sep|>context/rules                NESweep extension; cache-stable
 //   {rules body}
+//
+//   <|file_sep|>{path}.diff                  stable chronological history, if any
+//   original:
+//   {old}
+//   updated:
+//   {new}
+//
+//   <|file_sep|>{path}                       token-budgeted broad file context
+//   {file body around cursor}
 //
 //   <|file_sep|>context/retrieval            other open buffers + LSP results
 //   <|file_sep|>{snapshot.path}
 //   {snapshot body}
 //   ...
-//
-//   <|file_sep|>{path}.diff                  chronological diff history, if any
-//   original:
-//   {old}
-//   updated:
-//   {new}
 //
 //   <|file_sep|>context/outline              active + nearby LSP symbols
 //   active_symbol: Class::method
@@ -29,9 +32,6 @@
 //
 //   <|file_sep|>context/diagnostics          omitted if no diagnostics
 //   Line N: [source] message
-//
-//   <|file_sep|>{path}                       token-budgeted broad file context
-//   {file body around cursor}
 //
 //   <|file_sep|>original/{path}:N:M          edit window, no marker
 //   {window lines}
@@ -163,17 +163,22 @@ export function buildSweepPrompt(
 		.join("\n");
 	const broadSection =
 		broad === "" ? "" : `<|file_sep|>${req.file_path}\n${broad}\n`;
+	const diffSection = formatDiffSection(req.recent_changes);
+	if (diffSection !== "") body += diffSection;
+
+	// The broad active-file prefix is the first intentionally volatile section.
+	// Everything after it may change with symbol and LSP queries without
+	// invalidating cached code before the cursor.
+	body += broadSection;
+
 	const retrieval = formatRetrievalSection(
 		req.file_chunks,
 		req.retrieval_chunks,
 	);
 	if (retrieval !== "") body += retrieval;
 
-	const diffSection = formatDiffSection(req.recent_changes);
-	if (diffSection !== "") body += diffSection;
-
-	// The active symbol changes as the cursor moves. Keep all chronological
-	// edit history before it so history remains available to the prefix cache.
+	// The active symbol changes as the cursor moves. Keep it after broad
+	// current-file code so it cannot invalidate the earlier prefix cache.
 	const symbolOutline = req.symbol_outline?.trim() ?? "";
 	if (symbolOutline !== "") {
 		body += `<|file_sep|>context/outline\n${symbolOutline}\n`;
@@ -198,8 +203,6 @@ export function buildSweepPrompt(
 		);
 		if (diagnostics !== "") body += diagnostics;
 	}
-
-	body += broadSection;
 
 	const windowText = promptLines
 		.slice(windowStartLine, windowEndLine)

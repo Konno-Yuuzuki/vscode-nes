@@ -11,16 +11,24 @@ export const MERGE_WINDOW_MS = 60_000;
 // records — they are meaningful context.
 export const MERGE_LINE_FUZZ = 1;
 
-const HUNK_HEADER_RE = /@@ -\d+,\d+ \+(\d+),(\d+) @@/;
+const HUNK_HEADER_RE = /@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/g;
+
+export function parseNewSideRanges(diff: string): ParsedRange[] {
+	const ranges: ParsedRange[] = [];
+	for (const match of diff.matchAll(HUNK_HEADER_RE)) {
+		const newStart = Number.parseInt(match[1] ?? "", 10);
+		const newCount = Number.parseInt(match[2] ?? "1", 10);
+		if (!Number.isFinite(newStart) || !Number.isFinite(newCount)) continue;
+		ranges.push({
+			newStart,
+			newEnd: newStart + Math.max(0, newCount - 1),
+		});
+	}
+	return ranges;
+}
 
 export function parseNewSideRange(diff: string): ParsedRange | null {
-	const match = HUNK_HEADER_RE.exec(diff);
-	if (!match || match[1] === undefined || match[2] === undefined) return null;
-	const newStart = Number.parseInt(match[1], 10);
-	const newCount = Number.parseInt(match[2], 10);
-	if (!Number.isFinite(newStart) || !Number.isFinite(newCount)) return null;
-	const newEnd = newStart + Math.max(0, newCount - 1);
-	return { newStart, newEnd };
+	return parseNewSideRanges(diff)[0] ?? null;
 }
 
 export function rangesOverlap(

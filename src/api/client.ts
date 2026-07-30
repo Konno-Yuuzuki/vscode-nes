@@ -11,6 +11,7 @@ import {
 } from "~/core/constants.ts";
 import { logger } from "~/core/logger.ts";
 import type { CompletionServer } from "~/services/completion-server.ts";
+import { parseNewSideRanges } from "~/telemetry/edit-merger.ts";
 import { toUnixPath } from "~/utils/path.ts";
 import {
 	isFileTooLarge,
@@ -41,7 +42,7 @@ import {
 	type UserAction,
 } from "./schemas.ts";
 import { buildSweepResponse } from "./sweep-completion.ts";
-import { buildSweepPrompt } from "./sweep-prompt.ts";
+import { buildSweepPrompt, selectSweepBroadWindow } from "./sweep-prompt.ts";
 import {
 	formatSymbolOutline,
 	type OutlineSymbolLike,
@@ -101,6 +102,34 @@ export interface ApiClientOptions {
 // tokens per source line, this preserves the former 133-line cap.
 function retrievalChunkLines(): number {
 	return Math.max(1, Math.floor(config.editableTokens / 15));
+}
+
+/**
+ * The Sweep broad/original/current sections already carry the active edit.
+ * Do not duplicate an active-file diff that touches the broad window in the
+ * earlier history section: a coalesced typing hunk would otherwise become
+ * the first volatile prompt text and defeat prefix caching.
+ */
+export function excludeSweepBroadWindowChanges(
+	changes: RecentChange[],
+	activeFilePath: string,
+	lines: string[],
+	cursorLine: number,
+	editableTokens: number,
+): RecentChange[] {
+	const broadWindow = selectSweepBroadWindow(lines, cursorLine, editableTokens);
+	const startLine = broadWindow.start + 1;
+	const endLine = broadWindow.end;
+	return changes.filter((change) => {
+		if (toUnixPath(change.path) !== activeFilePath) return true;
+		const hunks = parseNewSideRanges(change.diff);
+		// An unparseable active-file diff is still duplicate, volatile context;
+		// omit it rather than allowing it to invalidate the early prefix.
+		if (hunks.length === 0) return false;
+		return !hunks.some(
+			(hunk) => hunk.newStart <= endLine && hunk.newEnd >= startLine,
+		);
+	});
 }
 
 export function formatRecentChanges(
@@ -490,8 +519,20 @@ export class ApiClient {
 
 		const filePath = toUnixPath(document.uri.fsPath) || "untitled";
 		const isZeta = format === "zeta2" || format === "zeta2.1";
+		const sweepRecentChanges = isZeta
+			? recentChanges
+			: excludeSweepBroadWindowChanges(
+					recentChanges,
+					filePath,
+					Array.from(
+						{ length: document.lineCount },
+						(_, line) => document.lineAt(line).text,
+					),
+					position.line,
+					config.editableTokens,
+				);
 		const recentChangesText = formatRecentChanges(
-			recentChanges,
+			sweepRecentChanges,
 			config.maxRecentChangesChars,
 			isZeta
 				? {

@@ -20,15 +20,15 @@
 //   <filename>{path}                          (recent buffer pseudo-files)
 //   {file body}
 //
-//   <filename>context/outline                 active + nearby LSP symbols
-//   active_symbol: Class::method
-//   nearby_functions:
-//   ...
-//
 //   <filename>edit_history                    (omitted if no recent changes)
 //   --- a/{path}
 //   +++ b/{path}
 //   {unified diff}
+//
+//   <filename>context/outline                 active + nearby LSP symbols
+//   active_symbol: Class::method
+//   nearby_functions:
+//   ...
 //
 //   <filename>diagnostics                     (omitted if no diagnostics)
 //   line N: [severity] message
@@ -382,7 +382,7 @@ export function buildZeta2Prompt(
 	body += suffixText.endsWith("\n") || suffixText === "" ? "" : "\n";
 	if (suffixText === "") body += "\n";
 
-	// Prefix section: <[fim-prefix]>{rules}{recent files}{edit_history}{diagnostics}{cursor file}
+	// Prefix section: <[fim-prefix]>{rules}{recent files}{edit_history}{outline}{diagnostics}{cursor file}
 	body += FIM_PREFIX;
 
 	// Workspace rules pseudo-file first inside the prefix block. Rules
@@ -415,16 +415,6 @@ export function buildZeta2Prompt(
 		body += relatedFilesText;
 	}
 
-	// Compact active-file structure from Document Symbols. It follows
-	// related code but precedes the high-churn diagnostics/history blocks,
-	// preserving a useful cache-stable prefix while restoring structural
-	// context lost by the intentionally small active-file excerpt.
-	const symbolOutline = req.symbol_outline?.trim() ?? "";
-	if (symbolOutline !== "") {
-		contextStats.outline = symbolOutline.length;
-		body += `${FILE_MARKER}context/outline\n${symbolOutline}\n\n`;
-	}
-
 	// Preserve Zed's training-time edit-history-first order. In particular,
 	// keep the suffix-first FIM layout above even though it limits prefix
 	// cache reuse when the cursor moves.
@@ -446,10 +436,19 @@ export function buildZeta2Prompt(
 	if (editHistoryText !== "") {
 		contextStats.editHistory = editHistory.length;
 	}
+	body += editHistoryText;
+
+	// The active symbol is cursor-dependent, unlike the chronological history.
+	// Keep it after history so cursor moves do not invalidate that prefix.
+	const symbolOutline = req.symbol_outline?.trim() ?? "";
+	if (symbolOutline !== "") {
+		contextStats.outline = symbolOutline.length;
+		body += `${FILE_MARKER}context/outline\n${symbolOutline}\n\n`;
+	}
+
 	if (diagnosticsText !== "") {
 		contextStats.diagnostics = diagnosticsText.length;
 	}
-	body += editHistoryText;
 	body += diagnosticsText;
 
 	// Cursor file section

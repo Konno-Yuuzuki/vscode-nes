@@ -73,4 +73,24 @@ describe("formatRecentChanges", () => {
 		expect(newest).toBeGreaterThan(previous);
 		expect(result).not.toContain("File: src/oldest.ts:");
 	});
+
+	test("evicts chronological history from its old end to retain newest edits", () => {
+		const largeOldDiff = diffWithBody(Array.from({ length: 24 }, () => "+old"));
+		const result = formatRecentChanges(
+			[
+				{ path: "src/newest.ts", diff: diffWithBody(["+newest"]) },
+				{ path: "src/previous.ts", diff: diffWithBody(["+previous"]) },
+				{ path: "src/oldest.ts", diff: largeOldDiff },
+			],
+			220,
+			{ oldestFirst: true, evictOldestToFit: true },
+		);
+
+		const previous = result.indexOf("File: src/previous.ts:");
+		const newest = result.indexOf("File: src/newest.ts:");
+		expect(result).not.toContain("File: src/oldest.ts:");
+		expect(previous).toBeGreaterThanOrEqual(0);
+		expect(newest).toBeGreaterThan(previous);
+		expect(result.length).toBeLessThanOrEqual(220);
+	});
 });

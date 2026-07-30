@@ -16,16 +16,16 @@
 //   {snapshot body}
 //   ...
 //
-//   <|file_sep|>context/outline              active + nearby LSP symbols
-//   active_symbol: Class::method
-//   nearby_functions:
-//   ...
-//
-//   <|file_sep|>{path}.diff                  diff history, if any
+//   <|file_sep|>{path}.diff                  chronological diff history, if any
 //   original:
 //   {old}
 //   updated:
 //   {new}
+//
+//   <|file_sep|>context/outline              active + nearby LSP symbols
+//   active_symbol: Class::method
+//   nearby_functions:
+//   ...
 //
 //   <|file_sep|>context/diagnostics          omitted if no diagnostics
 //   Line N: [source] message
@@ -169,13 +169,15 @@ export function buildSweepPrompt(
 	);
 	if (retrieval !== "") body += retrieval;
 
+	const diffSection = formatDiffSection(req.recent_changes);
+	if (diffSection !== "") body += diffSection;
+
+	// The active symbol changes as the cursor moves. Keep all chronological
+	// edit history before it so history remains available to the prefix cache.
 	const symbolOutline = req.symbol_outline?.trim() ?? "";
 	if (symbolOutline !== "") {
 		body += `<|file_sep|>context/outline\n${symbolOutline}\n`;
 	}
-
-	const diffSection = formatDiffSection(req.recent_changes);
-	if (diffSection !== "") body += diffSection;
 
 	// Diagnostics last among context sections — sits immediately before the
 	// original/current/updated triplet so the model attends to the latest

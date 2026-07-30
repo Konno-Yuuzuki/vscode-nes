@@ -108,9 +108,9 @@ describe("buildSweepPrompt", () => {
 		const active = result.prompt.indexOf("<|file_sep|>src/foo.ts");
 		const original = result.prompt.indexOf("<|file_sep|>original/src/foo.ts");
 		expect(retrieval).toBeGreaterThanOrEqual(0);
-		expect(outline).toBeGreaterThan(retrieval);
-		expect(diff).toBeGreaterThan(outline);
-		expect(active).toBeGreaterThan(diff);
+		expect(diff).toBeGreaterThan(retrieval);
+		expect(outline).toBeGreaterThan(diff);
+		expect(active).toBeGreaterThan(outline);
 		expect(original).toBeGreaterThan(active);
 		expect(result.contextStats?.outline).toBeGreaterThan(0);
 	});
@@ -302,9 +302,9 @@ describe("buildZeta2Prompt", () => {
 		const editHistory = result.prompt.indexOf("<filename>edit_history");
 		const cursorFile = result.prompt.lastIndexOf("<filename>src/foo.ts");
 		expect(farDefinition).toBeGreaterThanOrEqual(0);
-		expect(outline).toBeGreaterThan(farDefinition);
-		expect(editHistory).toBeGreaterThan(outline);
-		expect(cursorFile).toBeGreaterThan(editHistory);
+		expect(editHistory).toBeGreaterThan(farDefinition);
+		expect(outline).toBeGreaterThan(editHistory);
+		expect(cursorFile).toBeGreaterThan(outline);
 		expect(result.contextStats?.relatedFiles).toBeGreaterThan(0);
 		expect(result.contextStats?.outline).toBeGreaterThan(0);
 	});

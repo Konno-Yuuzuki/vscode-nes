@@ -109,6 +109,10 @@ export function formatRecentChanges(
 	options: {
 		maxEntries?: number;
 		oldestFirst?: boolean;
+		// When a chronological history exceeds its character budget, discard
+		// whole oldest records first. This retains the newest edits at the end
+		// of the prompt instead of allowing an old bulk edit to crowd them out.
+		evictOldestToFit?: boolean;
 	} = {},
 ): string {
 	const budget = Math.max(0, Math.floor(maxChars));
@@ -125,23 +129,54 @@ export function formatRecentChanges(
 		selectedChanges = selectedChanges.reverse();
 	}
 
-	let result = "";
-	for (const change of selectedChanges) {
+	const entries = selectedChanges.flatMap((change) => {
 		const cleaned = cleanRecentChangeDiff(change.diff);
-		if (!cleaned) continue;
-
+		if (!cleaned) return [];
 		const header = `File: ${change.path}:\n`;
-		const entry = `${header}${cleaned}\n`;
+		return [{ header, body: cleaned, text: `${header}${cleaned}\n` }];
+	});
+
+	if (options.evictOldestToFit) {
+		let start = 0;
+		let totalChars = entries.reduce(
+			(total, entry) => total + entry.text.length,
+			0,
+		);
+		// `entries` are chronological here: remove from the beginning so the
+		// most recent edit records survive at the end of the prompt.
+		while (start < entries.length - 1 && totalChars > budget) {
+			totalChars -= entries[start]?.text.length ?? 0;
+			start++;
+		}
+		const kept = entries.slice(start);
+		if (kept.length === 0) return "";
+		if (totalChars <= budget) return kept.map((entry) => entry.text).join("");
+
+		// One newest record alone exceeds the budget. Retain its leading diff
+		// context rather than dropping all history.
+		if (budget < MIN_TRUNCATED_RECENT_CHANGE_CHARS) return "";
+		const newest = kept[0];
+		return newest
+			? truncateRecentChangeEntry(newest.header, newest.body, budget)
+			: "";
+	}
+
+	let result = "";
+	for (const entry of entries) {
 		const remaining = budget - result.length;
 		if (remaining <= 0) break;
 
-		if (entry.length <= remaining) {
-			result += entry;
+		if (entry.text.length <= remaining) {
+			result += entry.text;
 			continue;
 		}
 
 		if (remaining < MIN_TRUNCATED_RECENT_CHANGE_CHARS) break;
-		const truncated = truncateRecentChangeEntry(header, cleaned, remaining);
+		const truncated = truncateRecentChangeEntry(
+			entry.header,
+			entry.body,
+			remaining,
+		);
 		if (truncated === "") break;
 		result += truncated;
 		break;
@@ -463,7 +498,15 @@ export class ApiClient {
 						maxEntries: ZETA_TRAINING_TEMPLATE_MAX_EDIT_EVENTS,
 						oldestFirst: true,
 					}
-				: {},
+				: {
+						// Sweep's active edit is already represented by broad context
+						// and original/current/updated. Chronological history keeps a
+						// stable prefix; evicting its oldest records preserves the newest
+						// useful edits at the volatile tail instead of pinning the cache
+						// to the just-typed hunk.
+						oldestFirst: true,
+						evictOldestToFit: true,
+					},
 		);
 		const fileChunks = this.buildFileChunks(recentBuffers);
 		const zetaWindow =

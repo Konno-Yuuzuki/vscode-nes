@@ -475,6 +475,21 @@ export class JumpEditManager implements vscode.Disposable {
 		this.pendingJumpEdit.nextAcceptLine = -1;
 		await this.applyAccept();
 	}
+
+	/**
+	 * Accept the next changed line of a multi-line jump edit, step by step.
+	 */
+	async acceptJumpEditLine(): Promise<void> {
+		if (!this.pendingJumpEdit) {
+			logger.warn("acceptJumpEditLine called but no pending jump edit");
+			return;
+		}
+		if (this.pendingJumpEdit.nextAcceptLine < 0) {
+			this.pendingJumpEdit.nextAcceptLine = 0;
+		}
+		await this.applyAccept();
+	}
+
 	private async applyAccept(): Promise<void> {
 		if (!this.pendingJumpEdit) return;
 		const pendingJumpEdit = this.pendingJumpEdit;

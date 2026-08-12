@@ -32,6 +32,9 @@ const noopChannel = {
 };
 
 mock.module("vscode", () => ({
+	env: {
+		appRoot: "/test/vscode/df53daabb1/resources/app",
+	},
 	window: {
 		createOutputChannel: () => noopChannel,
 		activeTextEditor: undefined,

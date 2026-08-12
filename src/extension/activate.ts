@@ -68,7 +68,7 @@ function maybeWarnAboutCopilotStylePresentation(): void {
 		});
 }
 
-function isProposedApiEnabled(): boolean {
+export function isProposedApiEnabled(): boolean {
 	try {
 		const productPath = findProductJson();
 		if (!productPath) return false;
@@ -84,7 +84,7 @@ function isProposedApiEnabled(): boolean {
 	}
 }
 
-function findProductJson(): string | null {
+export function findProductJson(): string | null {
 	const candidates = [
 		vscode.env.appRoot
 			? require("node:path").join(vscode.env.appRoot, "product.json")

@@ -39,11 +39,124 @@ function maybeWarnAboutCopilotStylePresentation(): void {
 	}
 
 	copilotStylePresentationWarningShown = true;
+	if (isProposedApiEnabled()) {
+		return;
+	}
 	void vscode.window.showWarningMessage(
-		`NESweep Copilot-style next-edit presentation uses VS Code proposed API. ` +
-			`It requires VS Code Insiders launched with --enable-proposed-api=${COPILOT_STYLE_PROPOSED_API_EXTENSION_ID}; ` +
-			`otherwise VS Code may silently ignore the inline edit presentation fields.`,
+		`NESweep Copilot-style next-edit presentation requires enabling proposed API ` +
+			`inlineCompletionsAdditions. Run the "NESweep: Enable Proposed APIs" command ` +
+			`to authorize the change, or launch VS Code with --enable-proposed-api=${COPILOT_STYLE_PROPOSED_API_EXTENSION_ID}.`,
 	);
+}
+
+function isProposedApiEnabled(): boolean {
+	try {
+		const productPath = findProductJson();
+		if (!productPath) return false;
+		const content = JSON.parse(
+			require("node:fs").readFileSync(productPath, "utf8"),
+		);
+		const ep = content.extensionEnabledApiProposals;
+		return !!ep?.[COPILOT_STYLE_PROPOSED_API_EXTENSION_ID]?.includes(
+			"inlineCompletionsAdditions",
+		);
+	} catch {
+		return false;
+	}
+}
+
+function findProductJson(): string | null {
+	const candidates = [
+		vscode.env.appRoot
+			? require("node:path").join(vscode.env.appRoot, "product.json")
+			: null,
+		process.env.VSCODE_APP_ROOT
+			? require("node:path").join(process.env.VSCODE_APP_ROOT, "product.json")
+			: null,
+	];
+	const knownPaths = [
+		"D:\\Microsoft VS Code\\df53daabb1\\resources\\app\\product.json",
+		"D:/Microsoft VS Code/df53daabb1/resources/app/product.json",
+	];
+	for (const p of [...candidates, ...knownPaths]) {
+		if (p && require("node:fs").existsSync(p)) return p;
+	}
+	return null;
+}
+
+async function enableProposedApi(): Promise<void> {
+	if (isProposedApiEnabled()) {
+		void vscode.window.showInformationMessage(
+			"NESweep proposed API is already enabled.",
+		);
+		return;
+	}
+
+	const productPath = findProductJson();
+	if (!productPath) {
+		void vscode.window.showErrorMessage(
+			"Cannot find VS Code product.json. Use --enable-proposed-api=sr-team.nesweep to start VS Code.",
+		);
+		return;
+	}
+
+	const selection = await vscode.window.showWarningMessage(
+		"Enable NESweep Copilot-style next-edit presentation?",
+		{
+			modal: true,
+			detail:
+				"This will modify product.json in the VS Code installation directory and requires administrator permission.",
+		},
+		"Enable",
+		"Cancel",
+	);
+	if (selection !== "Enable") return;
+
+	// Use PowerShell to modify product.json with admin rights
+	const script = `
+$p = '${productPath.replace(/\\/g, "\\\\")}'
+$c = Get-Content $p -Raw -Encoding UTF8
+$d = $c | ConvertFrom-Json
+if (-not $d.extensionEnabledApiProposals) {
+  $d | Add-Member -NotePropertyName "extensionEnabledApiProposals" -NotePropertyValue @{} -Force
+}
+if (-not $d.extensionEnabledApiProposals."sr-team.nesweep") {
+  $d.extensionEnabledApiProposals | Add-Member -NotePropertyName "sr-team.nesweep" -NotePropertyValue @("inlineCompletionsAdditions") -Force
+  $n = $d | ConvertTo-Json -Depth 10
+  # Write UTF-8 without BOM
+  [System.IO.File]::WriteAllText($p, $n, [System.Text.UTF8Encoding]::new($false))
+  Write-Host "OK"
+} else {
+  Write-Host "ALREADY"
+}
+`;
+	const b64 = Buffer.from(script, "utf16le").toString("base64");
+	const proc = require("node:child_process").spawn(
+		"powershell.exe",
+		["-NoProfile", "-NonInteractive", "-EncodedCommand", b64],
+		{ windowsHide: true },
+	);
+
+	await new Promise<void>((resolve) => {
+		proc.on("exit", () => resolve());
+		proc.on("error", () => resolve());
+		setTimeout(() => resolve(), 30000);
+	});
+
+	if (isProposedApiEnabled()) {
+		void vscode.window.showInformationMessage(
+			"NESweep proposed API enabled. Please restart VS Code completely for the change to take effect.",
+		);
+		// Show restart prompt
+		await vscode.window.showInformationMessage(
+			"Restart VS Code now to apply the change?",
+			"Restart Later",
+		);
+	} else {
+		void vscode.window.showErrorMessage(
+			"Failed to enable proposed API. Use --enable-proposed-api=sr-team.nesweep to start VS Code.",
+		);
+	}
 }
 
 export function activate(context: vscode.ExtensionContext) {
@@ -93,6 +206,11 @@ export function activate(context: vscode.ExtensionContext) {
 	const dismissJumpEditCommand = vscode.commands.registerCommand(
 		"sweep.dismissJumpEdit",
 		() => jumpEditManager.dismissJumpEdit(),
+	);
+
+	const enableProposedApiCommand = vscode.commands.registerCommand(
+		"sweep.enableProposedApi",
+		() => enableProposedApi(),
 	);
 
 	statusBar = new SweepStatusBar(context, apiClient);
@@ -190,6 +308,7 @@ export function activate(context: vscode.ExtensionContext) {
 		acceptJumpEditCommand,
 		acceptInlineEditCommand,
 		dismissJumpEditCommand,
+		enableProposedApiCommand,
 		changeListener,
 		saveListener,
 		editorChangeListener,

@@ -98,6 +98,10 @@
 			{
 				"command": "sweep.dismissJumpEdit",
 				"title": "NESweep: Dismiss Jump Edit"
+			},
+			{
+				"command": "sweep.enableProposedApi",
+				"title": "NESweep: Enable Proposed APIs"
 			}
 		],
 		"keybindings": [

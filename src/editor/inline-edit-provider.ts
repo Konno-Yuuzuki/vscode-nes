@@ -545,6 +545,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 
 				if (
 					context.selectedCompletionInfo &&
+					!config.useCopilotStyleNextEditPresentation &&
 					!inlineEditMatchesSelectedCompletion(
 						document,
 						normalizedResult,
@@ -597,6 +598,15 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 					copilotResults.slice(1).map((candidate) => candidate.result),
 				);
 				this.jumpEditManager.clearJumpEdit();
+				// Close the autocomplete suggest widget so the inline ghost text
+				// is not obscured by the completion popup.
+				try {
+					await vscode.commands.executeCommand(
+						"editor.action.suggestWidget.hide",
+					);
+				} catch {
+					// Command may not exist in all VS Code versions; non-fatal.
+				}
 				logger.info("Rendering Copilot-style inline edit sequence", {
 					count: copilotResults.length,
 					id: firstCopilotResult.result.id,

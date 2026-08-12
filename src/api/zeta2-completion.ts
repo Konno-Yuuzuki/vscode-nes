@@ -118,6 +118,9 @@ interface MarkerSpan {
 // gap between focused regions, while marker_1 → marker_4 replaces the whole
 // excerpt. A single marker is accepted as a compatibility fallback for
 // servers that strip the adjacent closing boundary as a stop sequence.
+// When the model echoes more than two markers (a full-excerpt rewrite), the
+// first and last markers delimit the span and any intermediate markers are
+// stripped from the replacement.
 function parseMarkerSpan(
 	text: string,
 	regions: EditRegion[],
@@ -137,10 +140,20 @@ function parseMarkerSpan(
 		});
 	}
 
-	if (hits.length === 0 || hits.length > 2) return null;
+	if (hits.length === 0) return null;
 	const start = hits[0];
 	if (!start || start.num < 1) return null;
-	const explicitEnd = hits[1];
+	// Marker numbers must form a strictly increasing sequence. A real
+	// full-excerpt rewrite echoes every boundary in order (1, 2, 3, …);
+	// repeats or decreases mean the model produced malformed scaffolding.
+	for (let i = 1; i < hits.length; i++) {
+		if (hits[i]?.num <= (hits[i - 1]?.num ?? 0)) return null;
+	}
+	// The last echoed marker bounds the replacement. For a normal two-marker
+	// span this is hits[1]; a full-excerpt rewrite echoes every boundary the
+	// prompt placed, so the trailing one is the closing boundary. A single
+	// marker keeps the legacy adjacent-boundary inference.
+	const explicitEnd = hits.length > 1 ? hits[hits.length - 1] : undefined;
 	const endMarkerNum = explicitEnd?.num ?? start.num + 1;
 	if (endMarkerNum <= start.num) return null;
 
@@ -161,6 +174,7 @@ function parseMarkerSpan(
 	// Markers are rendered on their own lines. Remove only their structural
 	// newline, preserving any additional blank lines produced by the model.
 	replacement = replacement.replace(/^\r?\n/, "").replace(/\r?\n$/, "");
+	replacement = replacement.replace(/<\|marker_\d+\|>/g, "");
 
 	return {
 		replacement,

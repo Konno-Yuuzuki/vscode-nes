@@ -99,4 +99,45 @@ describe("JumpEditManager", () => {
 
 		manager.dispose();
 	});
+
+	test("line-accept hint shows Ctrl+Enter when multiple lines changed", () => {
+		const document = makeDocument("line0\nline1\nline2\n");
+		const capturedDecorations: vscode.DecorationOptions[][] = [];
+		const editor = {
+			document,
+			options: { tabSize: 4 },
+			selection: {
+				active: new vscode.Position(2, 0),
+			},
+			setDecorations: (
+				_decorationType: vscode.TextEditorDecorationType,
+				options: vscode.DecorationOptions[],
+			) => {
+				capturedDecorations.push(options);
+			},
+		};
+		(
+			vscode.window as unknown as { activeTextEditor?: unknown }
+		).activeTextEditor = editor;
+
+		const manager = new JumpEditManager();
+		manager.setPendingJumpEdit(document, {
+			id: "multi-line",
+			startIndex: 0,
+			endIndex: "line0\nline1\n".length,
+			completion: "new0\nnew1\n",
+			confidence: 0.8,
+		});
+
+		const hint = capturedDecorations
+			.flat()
+			.find((option) =>
+				option.renderOptions?.after?.contentText?.includes("Ctrl+Enter"),
+			);
+
+		expect(hint?.renderOptions?.after?.contentText).toContain(
+			"Ctrl+Enter line",
+		);
+		manager.dispose();
+	});
 });

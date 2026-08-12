@@ -35,6 +35,11 @@ interface PendingJumpEdit {
 	editStartPos: vscode.Position;
 	editEndPos: vscode.Position;
 	originCursorLine: number;
+	/**
+	 * Index of the next line to accept when accepting a multi-line edit
+	 * step-by-step. -1 means "accept everything at once".
+	 */
+	nextAcceptLine: number;
 }
 
 export class JumpEditManager implements vscode.Disposable {
@@ -176,6 +181,7 @@ export class JumpEditManager implements vscode.Disposable {
 			editStartPos,
 			editEndPos,
 			originCursorLine: editor.selection.active.line,
+			nextAcceptLine: -1, // -1 = accept all at once
 		};
 
 		this.applyDecorations(editor, document);
@@ -414,8 +420,8 @@ export class JumpEditManager implements vscode.Disposable {
 			preview = `${added} of ${total} line${total > 1 ? "s" : ""} altered`;
 		}
 		const hintText = isOnAffectedLine
-			? `← Edit here: ${preview} (Alt+Tab accept, Esc dismiss)`
-			: `→ Edit at line ${targetLine + 1}: ${preview} (Alt+Tab)`;
+			? `← Edit here: ${preview} (Alt+Tab accept all, Ctrl+Enter line, Esc)`
+			: `→ Edit at line ${targetLine + 1}: ${preview} (Alt+Tab all, Ctrl+Enter line)`;
 
 		const hintDecoration: vscode.DecorationOptions = {
 			range: new vscode.Range(cursorLine, 0, cursorLine, 0),
@@ -465,92 +471,142 @@ export class JumpEditManager implements vscode.Disposable {
 			logger.warn("acceptJumpEdit called but no pending jump edit");
 			return;
 		}
-
+		// Accept all remaining lines at once
+		this.pendingJumpEdit.nextAcceptLine = -1;
+		await this.applyAccept();
+	}
+	private async applyAccept(): Promise<void> {
+		if (!this.pendingJumpEdit) return;
 		const pendingJumpEdit = this.pendingJumpEdit;
 		const editor = vscode.window.activeTextEditor;
 		if (!editor || editor.document.uri.toString() !== pendingJumpEdit.uri) {
-			logger.debug("acceptJumpEdit: editor mismatch, clearing jump edit");
+			logger.debug("applyAccept: editor mismatch, clearing jump edit");
 			this.clearJumpEdit();
 			return;
 		}
 
-		const { result } = pendingJumpEdit;
+		const { result, originalLines, newLines, nextAcceptLine } = pendingJumpEdit;
 		const start = editor.document.positionAt(result.startIndex);
 		const end = editor.document.positionAt(result.endIndex);
 
-		logger.info("Accepting jump edit", {
-			targetLine: start.line + 1,
+		// Accept all lines at once when nextAcceptLine is -1 or single-line edit
+		if (nextAcceptLine < 0 || newLines.length <= 1) {
+			logger.info("Accepting jump edit (all lines)", {
+				targetLine: start.line + 1,
+			});
+			const editRange = new vscode.Range(start, end);
+			const success = await editor.edit(
+				(editBuilder) => {
+					editBuilder.replace(editRange, result.completion);
+				},
+				{ undoStopBefore: true, undoStopAfter: true },
+			);
+			if (success) {
+				this.handlePostAccept(pendingJumpEdit, start, result);
+			}
+			this.clearJumpEdit();
+			return;
+		}
+
+		// Step-by-step: apply only the current line
+		const lineIdx = Math.min(nextAcceptLine, newLines.length - 1);
+		const oldLine = originalLines[lineIdx] ?? "";
+		const newLine = newLines[lineIdx] ?? "";
+		if (oldLine === newLine) {
+			pendingJumpEdit.nextAcceptLine = lineIdx + 1;
+			if (pendingJumpEdit.nextAcceptLine >= newLines.length) {
+				this.clearJumpEdit();
+				return;
+			}
+			this.refreshJumpEditDecorations();
+			return;
+		}
+
+		const docLine = start.line + lineIdx;
+		if (docLine >= editor.document.lineCount) {
+			this.clearJumpEdit();
+			return;
+		}
+
+		const lineRange = editor.document.lineAt(docLine).range;
+		logger.info("Accepting jump edit line", {
+			line: docLine + 1,
+			oldLine,
+			newLine,
 		});
 
-		const editRange = new vscode.Range(start, end);
 		const success = await editor.edit(
 			(editBuilder) => {
-				editBuilder.replace(editRange, result.completion);
+				editBuilder.replace(lineRange, newLine);
 			},
 			{ undoStopBefore: true, undoStopAfter: true },
 		);
 
 		if (success) {
-			let newPos: vscode.Position;
-			if (result.cursorTargetOffset !== undefined) {
-				// Land the cursor exactly where the model said it should go,
-				// translating the UTF-16 offset within `completion` into a
-				// (line, character) position in the post-edit buffer.
-				const before = result.completion.slice(0, result.cursorTargetOffset);
-				const newlinesBefore = (before.match(/\n/g) ?? []).length;
-				const targetLine = start.line + newlinesBefore;
-				const lastNl = before.lastIndexOf("\n");
-				const targetChar =
-					lastNl === -1
-						? start.character + before.length
-						: before.length - lastNl - 1;
-				const safeLine = Math.min(targetLine, editor.document.lineCount - 1);
-				newPos = new vscode.Position(safeLine, targetChar);
-				logger.debug("Jump edit cursor placed at predicted position", {
-					line: safeLine + 1,
-					character: targetChar,
-				});
+			pendingJumpEdit.nextAcceptLine = lineIdx + 1;
+			if (pendingJumpEdit.nextAcceptLine >= newLines.length) {
+				this.handlePostAccept(pendingJumpEdit, start, result);
+				this.clearJumpEdit();
 			} else {
-				const endsWithNewline = result.completion.endsWith("\n");
-				const insertedLines = result.completion.split("\n");
-				const contentLineCount = endsWithNewline
-					? insertedLines.length - 1
-					: insertedLines.length;
-				const newCursorLine = start.line + Math.max(0, contentLineCount - 1);
-				const safeLine = Math.min(newCursorLine, editor.document.lineCount - 1);
-				const newCursorChar = editor.document.lineAt(safeLine).text.length;
-				newPos = new vscode.Position(safeLine, newCursorChar);
+				pendingJumpEdit.targetLine =
+					start.line + pendingJumpEdit.nextAcceptLine;
+				this.refreshJumpEditDecorations();
 			}
-			editor.selection = new vscode.Selection(newPos, newPos);
-			editor.revealRange(
-				new vscode.Range(newPos, newPos),
-				vscode.TextEditorRevealType.InCenterIfOutsideViewport,
-			);
-			logger.info("Jump edit applied successfully");
-		} else {
-			logger.error("Failed to apply jump edit");
 		}
+	}
 
-		this.clearJumpEdit();
-		if (success) {
-			// editor.edit() applies the model change but VS Code does not always
-			// invoke inline completion again after we move the cursor to its next
-			// target. Wait for the edit and selection events to settle, then ask
-			// for the following prediction explicitly.
-			setTimeout(() => {
-				const activeEditor = vscode.window.activeTextEditor;
-				if (
-					!activeEditor ||
-					activeEditor.document.uri.toString() !== pendingJumpEdit.uri
-				) {
-					return;
-				}
-				logger.debug("Retriggering after accepted jump edit");
-				void vscode.commands.executeCommand(
-					"editor.action.inlineSuggest.trigger",
-				);
-			}, JUMP_RETRIGGER_DELAY_MS);
+	private handlePostAccept(
+		pendingJumpEdit: PendingJumpEdit,
+		start: vscode.Position,
+		result: AutocompleteResult,
+	): void {
+		const editor = vscode.window.activeTextEditor;
+		if (!editor) return;
+
+		let newPos: vscode.Position;
+		if (result.cursorTargetOffset !== undefined) {
+			const before = result.completion.slice(0, result.cursorTargetOffset);
+			const newlinesBefore = (before.match(/\n/g) ?? []).length;
+			const targetLine = start.line + newlinesBefore;
+			const lastNl = before.lastIndexOf("\n");
+			const targetChar =
+				lastNl === -1
+					? start.character + before.length
+					: before.length - lastNl - 1;
+			const safeLine = Math.min(targetLine, editor.document.lineCount - 1);
+			newPos = new vscode.Position(safeLine, targetChar);
+		} else {
+			const endsWithNewline = result.completion.endsWith("\n");
+			const insertedLines = result.completion.split("\n");
+			const contentLineCount = endsWithNewline
+				? insertedLines.length - 1
+				: insertedLines.length;
+			const newCursorLine = start.line + Math.max(0, contentLineCount - 1);
+			const safeLine = Math.min(newCursorLine, editor.document.lineCount - 1);
+			newPos = new vscode.Position(
+				safeLine,
+				editor.document.lineAt(safeLine).text.length,
+			);
 		}
+		editor.selection = new vscode.Selection(newPos, newPos);
+		editor.revealRange(
+			new vscode.Range(newPos, newPos),
+			vscode.TextEditorRevealType.InCenterIfOutsideViewport,
+		);
+		logger.info("Jump edit applied successfully");
+
+		setTimeout(() => {
+			const activeEditor = vscode.window.activeTextEditor;
+			if (
+				!activeEditor ||
+				activeEditor.document.uri.toString() !== pendingJumpEdit.uri
+			)
+				return;
+			logger.debug("Retriggering after accepted jump edit");
+			void vscode.commands.executeCommand(
+				"editor.action.inlineSuggest.trigger",
+			);
+		}, JUMP_RETRIGGER_DELAY_MS);
 	}
 
 	dismissJumpEdit(): void {

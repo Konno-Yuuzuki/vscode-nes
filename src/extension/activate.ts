@@ -216,6 +216,7 @@ if (-not $d.extensionEnabledApiProposals."sr-team.nesweep") {
 export function activate(context: vscode.ExtensionContext) {
 	const logChannel = initLogger();
 	logger.info("NESweep activated");
+	errorMonitor.init();
 	initSyntaxHighlighter();
 
 	tracker = new DocumentTracker(context);
@@ -248,6 +249,11 @@ export function activate(context: vscode.ExtensionContext) {
 	const acceptJumpEditCommand = vscode.commands.registerCommand(
 		"sweep.acceptJumpEdit",
 		() => jumpEditManager.acceptJumpEdit(),
+	);
+
+	const acceptJumpEditLineCommand = vscode.commands.registerCommand(
+		"sweep.acceptJumpEditLine",
+		() => jumpEditManager.acceptJumpEditLine(),
 	);
 
 	const acceptInlineEditCommand = vscode.commands.registerCommand(
@@ -360,6 +366,7 @@ export function activate(context: vscode.ExtensionContext) {
 		providerDisposable,
 		triggerCommand,
 		acceptJumpEditCommand,
+		acceptJumpEditLineCommand,
 		acceptInlineEditCommand,
 		dismissJumpEditCommand,
 		enableProposedApiCommand,
@@ -385,9 +392,68 @@ export function activate(context: vscode.ExtensionContext) {
 	void completionServer.ensureReachable();
 }
 
-export async function deactivate() {
+export function deactivate() {
 	// Persist the tracker tail before VS Code disposes subscriptions —
 	// covers manual reloads / window closes inside the 5-min AFK window.
-	await tracker?.flush();
+	void tracker?.flush();
 	disposeLogger();
+	errorMonitor.dispose();
 }
+
+/**
+ * Lightweight error monitor that collects errors in memory and surfaces
+ * a summary when the count exceeds a threshold.
+ */
+const ERROR_MONITOR_MAX = 20;
+class ErrorMonitor {
+	private errors: Array<{ message: string; timestamp: number }> = [];
+	private disposable: vscode.Disposable | null = null;
+	private warned = false;
+
+	init(): void {
+		const origError = logger.error.bind(logger);
+		logger.error = (...args: unknown[]) => {
+			this.record(fmt(args));
+			origError(...args);
+		};
+		this.disposable = vscode.commands.registerCommand(
+			"sweep.showErrorLog",
+			() => this.show(),
+		);
+	}
+
+	record(message: string): void {
+		this.errors.push({ message, timestamp: Date.now() });
+		if (this.errors.length > ERROR_MONITOR_MAX) {
+			this.errors.shift();
+		}
+		if (this.errors.length >= 5 && !this.warned) {
+			this.warned = true;
+			void vscode.window.showWarningMessage(
+				`NESweep has encountered ${this.errors.length} errors. Run "NESweep: Show Error Log" for details.`,
+			);
+		}
+	}
+
+	show(): void {
+		if (this.errors.length === 0) {
+			void vscode.window.showInformationMessage("No NESweep errors recorded.");
+			return;
+		}
+		const text = this.errors
+			.map(
+				(e) => `[${new Date(e.timestamp).toLocaleTimeString()}] ${e.message}`,
+			)
+			.join("\n");
+		void vscode.window.showInformationMessage(
+			`NESweep Error Log (${this.errors.length} entries):\n${text}`,
+			{ modal: true },
+		);
+	}
+
+	dispose(): void {
+		this.disposable?.dispose();
+	}
+}
+
+const errorMonitor = new ErrorMonitor();

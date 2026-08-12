@@ -92,6 +92,10 @@
 				"title": "NESweep: Accept Jump Edit"
 			},
 			{
+				"command": "sweep.acceptJumpEditLine",
+				"title": "NESweep: Accept Jump Edit Line"
+			},
+			{
 				"command": "sweep.acceptInlineEdit",
 				"title": "NESweep: Accept Inline Edit"
 			},
@@ -102,6 +106,10 @@
 			{
 				"command": "sweep.enableProposedApi",
 				"title": "NESweep: Enable Proposed APIs"
+			},
+			{
+				"command": "sweep.showErrorLog",
+				"title": "NESweep: Show Error Log"
 			}
 		],
 		"keybindings": [
@@ -113,6 +121,11 @@
 			{
 				"command": "sweep.acceptJumpEdit",
 				"key": "alt+tab",
+				"when": "editorTextFocus && sweep.hasJumpEdit && !editorHasSelection"
+			},
+			{
+				"command": "sweep.acceptJumpEditLine",
+				"key": "ctrl+enter",
 				"when": "editorTextFocus && sweep.hasJumpEdit && !editorHasSelection"
 			},
 			{

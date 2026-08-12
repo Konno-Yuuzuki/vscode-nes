@@ -34,6 +34,19 @@ export class SweepConfig {
 		return this.config.get<boolean>("enabled", true);
 	}
 
+	get streamEnabled(): boolean {
+		return this.config.get<boolean>("streamEnabled", true);
+	}
+
+	/**
+	 * Include clipboard content as context in the prompt. Disabled by default
+	 * because clipboard text (error messages, logs, terminal output) often
+	 * confuses the model more than it helps.
+	 */
+	get includeClipboard(): boolean {
+		return this.config.get<boolean>("includeClipboard", false);
+	}
+
 	get maxContextFiles(): number {
 		return this.nonNegativeInteger(
 			"maxContextFiles",

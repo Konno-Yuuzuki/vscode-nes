@@ -815,6 +815,7 @@ export class ApiClient {
 	}
 
 	private async buildClipboardChunks(): Promise<FileChunk[]> {
+		if (!config.includeClipboard) return [];
 		try {
 			const clipboard = (await vscode.env.clipboard.readText()).trim();
 			if (!clipboard) return [];

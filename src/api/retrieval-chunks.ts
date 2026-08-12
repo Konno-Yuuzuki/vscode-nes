@@ -1,13 +1,51 @@
 import type { FileChunk } from "./schemas.ts";
 
+// NESweep log markers that indicate clipboard content is a trace/log dump
+// that would pollute the model prompt rather than provide useful context.
+const NES_LOG_PATTERNS = [
+	"<|marker_",
+	"<[fim-suffix]>",
+	"<[fim-prefix]>",
+	"<[fim-middle]>",
+	"/v1/completions",
+	"prompt_eval=",
+	"response_chars=",
+	"zeta2 response contained",
+	"Edit display classification",
+	"Rendering Copilot-style",
+	"Creating inline edit",
+	"Sweeping inline edit",
+	"Suppressing inline edit",
+];
+
+/**
+ * Check if clipboard content looks like a NESweep trace/log dump.
+ * Returns true when the text contains enough markers to be considered
+ * a log — the model seeing its own prompt scaffolding produces garbage.
+ */
+function isPollutedClipboard(content: string): boolean {
+	if (content.length < 50) return false;
+	let hits = 0;
+	for (const pattern of NES_LOG_PATTERNS) {
+		if (content.includes(pattern)) hits++;
+		if (hits >= 2) return true;
+	}
+	return false;
+}
+
 export function orderRetrievalChunks(
 	chunks: FileChunk[],
 	stable: boolean,
 	maxChunks = Number.POSITIVE_INFINITY,
 ): FileChunk[] {
+	const filtered = chunks.filter(
+		(chunk) =>
+			chunk.file_path !== "clipboard.txt" ||
+			!isPollutedClipboard(chunk.content),
+	);
 	const ordered = stable
-		? [...chunks].sort(compareRetrievalChunks)
-		: [...chunks];
+		? [...filtered].sort(compareRetrievalChunks)
+		: [...filtered];
 	const clipboard = ordered.filter(
 		(chunk) => chunk.file_path === "clipboard.txt",
 	);

@@ -397,19 +397,35 @@ export class JumpEditManager implements vscode.Disposable {
 		const isOnAffectedLine =
 			cursorLine >= startLine && cursorLine <= editEndLine;
 
-		if (!isOnAffectedLine) {
-			const hintDecoration: vscode.DecorationOptions = {
-				range: new vscode.Range(cursorLine, 0, cursorLine, 0),
-				renderOptions: {
-					after: {
-						contentText: `→ Edit at line ${targetLine + 1} (Alt+Tab accept, Esc dismiss)`,
-					},
-				},
-			};
-			editor.setDecorations(HINT_DECORATION_TYPE, [hintDecoration]);
+		// Build a compact preview of the edit content for the hint text.
+		let preview = "";
+		const changedLines = newLines.filter((line, i) => {
+			const oldLine = originalLines[i];
+			return oldLine !== undefined ? oldLine !== line : true;
+		});
+		if (changedLines.length === 0) {
+			preview = newLines.join("\\n").slice(0, 60);
+		} else if (changedLines.length === 1) {
+			const first = changedLines[0] ?? "";
+			preview = first.length > 50 ? first.slice(0, 47) + "..." : first;
 		} else {
-			editor.setDecorations(HINT_DECORATION_TYPE, []);
+			const added = changedLines.length;
+			const total = newLines.length;
+			preview = `${added} of ${total} line${total > 1 ? "s" : ""} altered`;
 		}
+		const hintText = isOnAffectedLine
+			? `← Edit here: ${preview} (Alt+Tab accept, Esc dismiss)`
+			: `→ Edit at line ${targetLine + 1}: ${preview} (Alt+Tab)`;
+
+		const hintDecoration: vscode.DecorationOptions = {
+			range: new vscode.Range(cursorLine, 0, cursorLine, 0),
+			renderOptions: {
+				after: {
+					contentText: hintText,
+				},
+			},
+		};
+		editor.setDecorations(HINT_DECORATION_TYPE, [hintDecoration]);
 	}
 
 	private getLineDiff(

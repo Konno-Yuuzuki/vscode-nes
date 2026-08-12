@@ -9,9 +9,13 @@ export class CompletionServer implements vscode.Disposable {
 	private consecutiveFailures = 0;
 	private lastWarningAt = 0;
 	private warned = false;
+	private client: CompletionClient | null = null;
 
 	getClient(): CompletionClient {
-		return new CompletionClient(config.serverUrl);
+		if (!this.client) {
+			this.client = new CompletionClient(config.serverUrl);
+		}
+		return this.client;
 	}
 
 	async ensureReachable(): Promise<boolean> {

@@ -90,6 +90,14 @@ export class SweepConfig {
 		);
 	}
 
+	/**
+	 * Stream completions over SSE when the server supports it. Falls back to
+	 * a single-shot request when the server rejects the stream flag.
+	 */
+	get streamEnabled(): boolean {
+		return this.config.get<boolean>("streamEnabled", true);
+	}
+
 	get serverUrl(): string {
 		return this.config.get<string>("serverUrl", DEFAULT_SERVER_URL);
 	}

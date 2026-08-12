@@ -316,6 +316,10 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		this.tracker = tracker;
 		this.jumpEditManager = jumpEditManager;
 		this.api = api;
+		// Forward streaming partial results to the status bar for progress feedback
+		api.onPartialResult = (text: string) => {
+			logger.trace("Streaming partial result chunk:", text.slice(-120));
+		};
 	}
 
 	async provideInlineCompletionItems(

@@ -1,9 +1,4 @@
-// OpenAI-compatible /v1/completions client (llama.cpp's llama-server, vLLM,
-// any compat shim). Context size and idle eviction are server-side concerns
-// (e.g. llama-server's --ctx-size flag), so this request shape carries
-// neither. usage.prompt_tokens / completion_tokens are surfaced as
-// promptEvalCount / evalCount for log parity.
-
+import { EventEmitter } from "node:events";
 import * as http from "node:http";
 import * as https from "node:https";
 
@@ -50,10 +45,45 @@ export class CompletionClient {
 			stream: false,
 		};
 
+		return this.sendRequest(body, req.timeoutMs, signal);
+	}
+
+	/**
+	 * Stream a completion via SSE. Calls `onToken(result)` with each partial
+	 * result (accumulated text), then resolves the promise with the final result.
+	 */
+	async completeStream(
+		req: CompletionRequest,
+		signal: AbortSignal | undefined,
+		onToken: (partial: CompletionResult) => void,
+	): Promise<CompletionResult> {
+		const body = {
+			model: req.model,
+			prompt: req.prompt,
+			temperature: req.temperature,
+			max_tokens: req.maxTokens,
+			stop: req.stop,
+			stream: true,
+		};
+
+		return this.sendRequest(body, req.timeoutMs, signal, onToken);
+	}
+
+	private async sendRequest(
+		body: Record<string, unknown>,
+		timeoutMs: number,
+		signal?: AbortSignal,
+		onToken?: (partial: CompletionResult) => void,
+	): Promise<CompletionResult> {
 		const payload = JSON.stringify(body);
 		const url = new URL("/v1/completions", this.baseUrl);
 		const transport = url.protocol === "https:" ? https : http;
 		const port = url.port || (url.protocol === "https:" ? 443 : 80);
+
+		const result: CompletionResult = {
+			text: "",
+			finishReason: "stop",
+		};
 
 		return new Promise((resolve, reject) => {
 			let settled = false;
@@ -75,15 +105,60 @@ export class CompletionClient {
 					"Content-Type": "application/json",
 					"Content-Length": Buffer.byteLength(payload),
 				},
-				timeout: req.timeoutMs,
+				timeout: timeoutMs,
 			};
 
 			const httpReq = transport.request(reqOptions, (res) => {
+				const isStreaming = body.stream === true;
 				let data = "";
+				let lastEmit = 0;
+
+				const emitToken = () => {
+					if (!onToken) return;
+					const now = Date.now();
+					if (now - lastEmit < 80) return;
+					lastEmit = now;
+					onToken({ ...result });
+				};
 
 				const onResponseData = (chunk: Buffer | string) => {
-					data += chunk.toString();
+					const chunkStr = chunk.toString();
+					if (isStreaming) {
+						// Parse SSE events: "data: {...}\n\n"
+						data += chunkStr;
+						const lines = data.split("\n");
+						data = lines.pop() ?? "";
+						for (const line of lines) {
+							const trimmed = line.trim();
+							if (!trimmed || !trimmed.startsWith("data:")) continue;
+							const jsonStr = trimmed.slice(5).trim();
+							if (jsonStr === "[DONE]") continue;
+							try {
+								const parsed = JSON.parse(jsonStr) as OpenAICompletionResponse;
+								const choice = parsed.choices?.[0];
+								if (choice?.text) {
+									result.text += choice.text;
+									result.finishReason = choice.finish_reason ?? "stop";
+									if (parsed.usage?.prompt_tokens !== undefined) {
+										result.promptEvalCount = parsed.usage.prompt_tokens;
+									}
+									if (parsed.usage?.completion_tokens !== undefined) {
+										result.evalCount = parsed.usage.completion_tokens;
+									}
+									emitToken();
+								}
+								if (choice?.finish_reason) {
+									result.finishReason = choice.finish_reason;
+								}
+							} catch {
+								// Incomplete JSON line — keep accumulating
+							}
+						}
+					} else {
+						data += chunkStr;
+					}
 				};
+
 				const onResponseEnd = () => {
 					responseEnded = true;
 					if (res.statusCode !== 200) {
@@ -96,26 +171,30 @@ export class CompletionClient {
 						);
 						return;
 					}
-					try {
-						const parsed = JSON.parse(data) as OpenAICompletionResponse;
-						const choice = parsed.choices?.[0];
-						const result: CompletionResult = {
-							text: choice?.text ?? "",
-							finishReason: choice?.finish_reason ?? "stop",
-						};
-						if (parsed.usage?.prompt_tokens !== undefined) {
-							result.promptEvalCount = parsed.usage.prompt_tokens;
+					if (!isStreaming) {
+						try {
+							const parsed = JSON.parse(data) as OpenAICompletionResponse;
+							const choice = parsed.choices?.[0];
+							result.text = choice?.text ?? "";
+							result.finishReason = choice?.finish_reason ?? "stop";
+							if (parsed.usage?.prompt_tokens !== undefined) {
+								result.promptEvalCount = parsed.usage.prompt_tokens;
+							}
+							if (parsed.usage?.completion_tokens !== undefined) {
+								result.evalCount = parsed.usage.completion_tokens;
+							}
+						} catch {
+							finish(() =>
+								reject(new Error("Failed to parse completion response")),
+							);
+							return;
 						}
-						if (parsed.usage?.completion_tokens !== undefined) {
-							result.evalCount = parsed.usage.completion_tokens;
-						}
-						finish(() => resolve(result));
-					} catch {
-						finish(() =>
-							reject(new Error("Failed to parse completion response")),
-						);
 					}
+					// Final emit for streaming: send the complete result
+					if (onToken) onToken({ ...result });
+					finish(() => resolve(result));
 				};
+
 				const onResponseAborted = () => {
 					finish(() =>
 						reject(
@@ -125,11 +204,13 @@ export class CompletionClient {
 						),
 					);
 				};
+
 				const onResponseError = (error: Error) => {
 					finish(() =>
 						reject(new Error(`Completion response error: ${error.message}`)),
 					);
 				};
+
 				const onResponseClose = () => {
 					if (responseEnded || res.complete) return;
 					finish(() =>
@@ -156,7 +237,7 @@ export class CompletionClient {
 
 			const onTimeout = () => {
 				const err = new Error(
-					`Completion request timed out after ${req.timeoutMs}ms`,
+					`Completion request timed out after ${timeoutMs}ms`,
 				);
 				finish(() => {
 					httpReq.destroy();
@@ -184,7 +265,7 @@ export class CompletionClient {
 
 			httpReq.on("error", onError);
 			httpReq.on("timeout", onTimeout);
-			deadlineTimer = setTimeout(onTimeout, req.timeoutMs);
+			deadlineTimer = setTimeout(onTimeout, timeoutMs);
 			if (signal) {
 				if (signal.aborted) {
 					onAbort();

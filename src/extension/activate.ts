@@ -42,11 +42,30 @@ function maybeWarnAboutCopilotStylePresentation(): void {
 	if (isProposedApiEnabled()) {
 		return;
 	}
-	void vscode.window.showWarningMessage(
-		`NESweep Copilot-style next-edit presentation requires enabling proposed API ` +
-			`inlineCompletionsAdditions. Run the "NESweep: Enable Proposed APIs" command ` +
-			`to authorize the change, or launch VS Code with --enable-proposed-api=${COPILOT_STYLE_PROPOSED_API_EXTENSION_ID}.`,
-	);
+	// Show a modal dialog with Enable/Never/Later options, matching the
+	// original ucp-style flow. The user picks "Enable" → UAC prompt →
+	// product.json updated → restart prompt.
+	void vscode.window
+		.showWarningMessage(
+			"NESweep uses the proposed inlineCompletionsAdditions API to display Copilot-style inline edits. " +
+				"Enabling it modifies product.json in the current VS Code installation and requires administrator permission. " +
+				"Without it, Tab-accepted jump edits still work, but the inline edit presentation is not displayed.",
+			{ modal: true },
+			{ title: "Enable", isCloseAffordance: false },
+			{ title: "Never Remind Again", isCloseAffordance: false },
+			{ title: "Later", isCloseAffordance: true },
+		)
+		.then((selection) => {
+			if (!selection) return;
+			if (selection.title === "Enable") {
+				void enableProposedApi();
+			} else if (selection.title === "Never Remind Again") {
+				// Dismissed permanently — reset the flag so the warning stays
+				// hidden even if the user later enables the setting again.
+				copilotStylePresentationWarningShown = true;
+			}
+			// "Later" — just dismiss; the warning will show again on next restart.
+		});
 }
 
 function isProposedApiEnabled(): boolean {

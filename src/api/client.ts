@@ -265,6 +265,8 @@ export class ApiClient {
 	private inFlight = 0;
 	private readonly processingEmitter = new vscode.EventEmitter<boolean>();
 	readonly onDidChangeProcessing = this.processingEmitter.event;
+	/** Callback invoked with partial completion text during streaming. */
+	onPartialResult: ((text: string) => void) | null = null;
 
 	constructor(server: CompletionServer, options: ApiClientOptions = {}) {
 		this.server = server;
@@ -362,17 +364,41 @@ export class ApiClient {
 			if (completion) {
 				logger.info("↻ reused identical /v1/completions prompt result");
 			} else {
-				completion = await this.server.getClient().complete(
-					{
-						model: config.modelName,
-						prompt: prompt.prompt,
-						temperature: TEMPERATURE,
-						maxTokens: MAX_TOKENS,
-						stop: prompt.stopTokens,
-						timeoutMs: config.completionTimeoutMs,
-					},
-					signal,
-				);
+				try {
+					completion = await this.server.getClient().completeStream(
+						{
+							model: config.modelName,
+							prompt: prompt.prompt,
+							temperature: TEMPERATURE,
+							maxTokens: MAX_TOKENS,
+							stop: prompt.stopTokens,
+							timeoutMs: config.completionTimeoutMs,
+						},
+						signal,
+						(partial) => {
+							if (this.onPartialResult && partial.text.length > 0) {
+								this.onPartialResult(partial.text);
+							}
+						},
+					);
+				} catch {
+					// Streaming may fail if the server doesn't support SSE;
+					// fall back to a single-shot request.
+					logger.info(
+						"Streaming failed, falling back to non-streaming request",
+					);
+					completion = await this.server.getClient().complete(
+						{
+							model: config.modelName,
+							prompt: prompt.prompt,
+							temperature: TEMPERATURE,
+							maxTokens: MAX_TOKENS,
+							stop: prompt.stopTokens,
+							timeoutMs: config.completionTimeoutMs,
+						},
+						signal,
+					);
+				}
 				this.server.reportSuccess();
 				if (config.reuseIdenticalPromptResults) {
 					this.rememberIdenticalPromptResult(promptCacheKey, completion);

@@ -98,8 +98,14 @@ describe("shouldCoalesce", () => {
 		expect(shouldCoalesce(a, b, now)).toBe(true);
 	});
 
-	test("edits 90s apart on same line do not coalesce", () => {
+	test("edits 90s apart on same line coalesce (window is 120s)", () => {
 		const a = rec(diffAt(42, 1), now - 90_000);
+		const b = rec(diffAt(42, 1), now);
+		expect(shouldCoalesce(a, b, now)).toBe(true);
+	});
+
+	test("edits beyond the merge window do not coalesce", () => {
+		const a = rec(diffAt(42, 1), now - MERGE_WINDOW_MS - 1_000);
 		const b = rec(diffAt(42, 1), now);
 		expect(shouldCoalesce(a, b, now)).toBe(false);
 	});

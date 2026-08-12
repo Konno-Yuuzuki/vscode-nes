@@ -604,12 +604,16 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 				this.jumpEditManager.clearJumpEdit();
 				// Close the autocomplete suggest widget so the inline ghost text
 				// is not obscured by the completion popup.
-				try {
-					await vscode.commands.executeCommand(
-						"editor.action.suggestWidget.hide",
-					);
-				} catch {
-					// Command may not exist in all VS Code versions; non-fatal.
+				const CLOSE_SUGGEST_COMMANDS = [
+					"editor.action.suggestWidget.hide",
+					"editor.action.closeSuggestWidget",
+					"closeSuggestWidget",
+				];
+				for (const cmd of CLOSE_SUGGEST_COMMANDS) {
+					try {
+						await vscode.commands.executeCommand(cmd);
+						break;
+					} catch {}
 				}
 				logger.info("Rendering Copilot-style inline edit sequence", {
 					count: copilotResults.length,

@@ -5,7 +5,7 @@ export interface ParsedRange {
 	newEnd: number;
 }
 
-export const MERGE_WINDOW_MS = 60_000;
+export const MERGE_WINDOW_MS = 120_000;
 // Tolerates a single inserted/removed line shifting downstream ranges
 // (the common Enter case). Larger structural moves stay as distinct
 // records — they are meaningful context.

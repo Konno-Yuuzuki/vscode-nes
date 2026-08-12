@@ -94,9 +94,44 @@ function findProductJson(): string | null {
 			: null,
 	];
 	const knownPaths = [
-		"D:\\Microsoft VS Code\\df53daabb1\\resources\\app\\product.json",
+		"D:\\\\Microsoft VS Code\\\\df53daabb1\\\\resources\\\\app\\\\product.json",
 		"D:/Microsoft VS Code/df53daabb1/resources/app/product.json",
 	];
+	// Scan for versioned subdirectories (e.g. df53daabb1) when appRoot
+	// points to a parent directory like D:\Microsoft VS Code\.
+	if (vscode.env.appRoot) {
+		const parent = require("node:path").dirname(vscode.env.appRoot);
+		const grandparent = require("node:path").dirname(parent);
+		try {
+			for (const entry of require("node:fs").readdirSync(parent)) {
+				const candidate = require("node:path").join(
+					parent,
+					entry,
+					"resources",
+					"app",
+					"product.json",
+				);
+				if (require("node:fs").existsSync(candidate)) {
+					knownPaths.push(candidate);
+				}
+			}
+			// Also check grandparent (one level up)
+			for (const entry of require("node:fs").readdirSync(grandparent)) {
+				const candidate = require("node:path").join(
+					grandparent,
+					entry,
+					"resources",
+					"app",
+					"product.json",
+				);
+				if (require("node:fs").existsSync(candidate)) {
+					knownPaths.push(candidate);
+				}
+			}
+		} catch {
+			// readdir may fail for permission reasons; skip scan
+		}
+	}
 	for (const p of [...candidates, ...knownPaths]) {
 		if (p && require("node:fs").existsSync(p)) return p;
 	}

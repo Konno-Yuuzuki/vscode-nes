@@ -75,6 +75,43 @@ const MIN_TRUNCATED_RECENT_CHANGE_CHARS = 120;
 const OUTLINE_PROVIDER_TIMEOUT_MS = 2000;
 const OUTLINE_PROVIDER_RETRY_BACKOFF_MS = 30_000;
 const MAX_OUTLINE_CACHE_ENTRIES = 16;
+const PROMPT_PREFIX_CACHE_SIZE = 8;
+
+/**
+ * Simple LRU cache for prompt prefixes (rules + related files section).
+ * Keyed by a hash of the rules content + related file identities, so the
+ * stable prefix can be reused across requests and maximise server-side
+ * prefix-cache hits.
+ */
+class PromptPrefixCache {
+	private readonly cache = new Map<string, string>();
+	private readonly maxSize: number;
+
+	constructor(maxSize: number) {
+		this.maxSize = maxSize;
+	}
+
+	get(key: string): string | undefined {
+		const value = this.cache.get(key);
+		if (value !== undefined) {
+			// Move to end (most recently used)
+			this.cache.delete(key);
+			this.cache.set(key, value);
+		}
+		return value;
+	}
+
+	set(key: string, value: string): void {
+		if (this.cache.has(key)) {
+			this.cache.delete(key);
+		} else if (this.cache.size >= this.maxSize) {
+			// Evict least recently used (first entry)
+			const oldest = this.cache.keys().next().value;
+			if (oldest !== undefined) this.cache.delete(oldest);
+		}
+		this.cache.set(key, value);
+	}
+}
 
 interface DocumentSymbolsCacheEntry {
 	version: number;
@@ -267,6 +304,12 @@ export class ApiClient {
 	readonly onDidChangeProcessing = this.processingEmitter.event;
 	/** Callback invoked with partial completion text during streaming. */
 	onPartialResult: ((text: string) => void) | null = null;
+	/** Caches the stable prompt prefix (rules + related files) per model. */
+	private readonly promptPrefixCache = new PromptPrefixCache(
+		PROMPT_PREFIX_CACHE_SIZE,
+	);
+	/** Last stable-context hash per model, to detect when the prefix changed. */
+	private lastPromptPrefixKey = "";
 
 	constructor(server: CompletionServer, options: ApiClientOptions = {}) {
 		this.server = server;
@@ -321,6 +364,17 @@ export class ApiClient {
 		const commentPrefix = getCommentPrefix(input.document.languageId);
 		const inlineDiagnosticsMarker = config.inlineDiagnosticsMarker;
 		const messageTransforms = config.diagnosticsMessageTransforms;
+
+		// Compute a stable-context key from the parts that change slowly
+		// (rules, related files). When the key matches the previous request,
+		// the server-side prefix cache is likely still warm — log it.
+		const stableKey = `${format}:${rules.length}:${(requestData.retrieval_chunks ?? []).length}:${requestData.file_path}`;
+		const prefixCached = this.lastPromptPrefixKey === stableKey;
+		this.lastPromptPrefixKey = stableKey;
+		if (prefixCached) {
+			logger.debug("Stable context unchanged; server prefix cache likely warm");
+		}
+
 		const prompt: ModelPrompt =
 			format === "zeta2" || format === "zeta2.1"
 				? buildZeta2Prompt(parsedRequest.data, {

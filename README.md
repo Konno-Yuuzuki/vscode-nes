@@ -75,7 +75,7 @@ Run any supported edit-prediction GGUF behind an OpenAI-compatible
 llama-server -hf henrik3/zeta-next-edit-v2-7B-GGUF --ctx-size 32768
 
 # Sweep 1.5B (smaller, faster — turn on zeta.injectInlineDiagnostics)
-llama-server -hf sweepai/zeta-next-edit-1.5B --ctx-size 32768
+llama-server -hf zeta-edit-prediction --ctx-size 32768
 
 # Zeta-2 (Zed's SeedCoder-8B, single-region)
 llama-server -hf bartowski/zed-industries_zeta-2-GGUF --ctx-size 16384

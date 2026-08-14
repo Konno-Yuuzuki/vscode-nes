@@ -47,6 +47,14 @@ export class SweepConfig {
 		return this.config.get<boolean>("includeClipboard", false);
 	}
 
+	/**
+	 * Sampling temperature for the model. Lower values (0.0–0.2) are more
+	 * deterministic; higher values (0.3–0.8) increase creativity.
+	 */
+	get temperature(): number {
+		return this.config.get<number>("temperature", 0.0);
+	}
+
 	get maxContextFiles(): number {
 		return this.nonNegativeInteger(
 			"maxContextFiles",

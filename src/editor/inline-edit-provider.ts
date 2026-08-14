@@ -282,6 +282,23 @@ function findLineEdits(oldLines: string[], newLines: string[]): LineEdit[] {
 	return edits;
 }
 
+/** Command names for hiding the native suggest widget across VS Code versions. */
+const SUGGEST_HIDE_COMMANDS = [
+	"editor.action.suggestWidget.hide",
+	"editor.action.closeSuggestWidget",
+	"closeSuggestWidget",
+	"hideSuggestWidget",
+];
+
+function hideSuggestWidget(): void {
+	for (const cmd of SUGGEST_HIDE_COMMANDS) {
+		try {
+			void vscode.commands.executeCommand(cmd);
+			return;
+		} catch {}
+	}
+}
+
 export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 	private tracker: DocumentTracker;
 	private jumpEditManager: JumpEditManager;
@@ -330,6 +347,12 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		if (!config.enabled) return undefined;
 		if (config.isAutocompleteSnoozed()) return undefined;
 
+		// Do NOT hide the suggest widget here. VS Code re-opens a closed
+		// suggest widget immediately for ini/toml/conf files (key=value
+		// suggestions), which triggers the provider again → infinite loop.
+		// The suggest widget is only closed after a valid completion is
+		// produced (see hideSuggestWidget call before rendering results).
+
 		const suppressionReason = await this.getSuppressionReason(document);
 		if (suppressionReason) {
 			logger.debug("Suppressing inline edit:", suppressionReason);
@@ -372,6 +395,16 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 			currentContent === originalContent &&
 			context.triggerKind !== vscode.InlineCompletionTriggerKind.Invoke
 		) {
+			// If the tracker hasn't seen this URI yet, originalContent falls
+			// back to currentContent above, making the check always-true and
+			// silently blocking every request. Log the case so we can tell
+			// whether the file is genuinely untouched vs. un-tracked.
+			if (!this.tracker.getOriginalContent(uri)) {
+				logger.debug(
+					"Suppressing inline edit: document not tracked by tracker",
+					{ uri, requestId },
+				);
+			}
 			return undefined;
 		}
 		if (this.shouldConsumeQueuedSuggestion) {
@@ -457,6 +490,13 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 				token.isCancellationRequested ||
 				!responseResults?.length
 			) {
+				logger.debug("Inline edit response discarded before render", {
+					uri,
+					requestId,
+					disabled: !config.enabled,
+					cancelled: token.isCancellationRequested,
+					resultCount: responseResults?.length ?? 0,
+				});
 				return undefined;
 			}
 
@@ -598,15 +638,6 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 					copilotResults.slice(1).map((candidate) => candidate.result),
 				);
 				this.jumpEditManager.clearJumpEdit();
-				// Close the autocomplete suggest widget so the inline ghost text
-				// is not obscured by the completion popup.
-				try {
-					await vscode.commands.executeCommand(
-						"editor.action.suggestWidget.hide",
-					);
-				} catch {
-					// Command may not exist in all VS Code versions; non-fatal.
-				}
 				logger.info("Rendering Copilot-style inline edit sequence", {
 					count: copilotResults.length,
 					id: firstCopilotResult.result.id,
@@ -829,6 +860,13 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		result: AutocompleteResult,
 		options: CompletionItemBuildOptions = {},
 	): vscode.InlineCompletionList | undefined {
+		// A valid completion is being rendered — close any open suggest
+		// widget so the ghost text is not obscured. Fire-and-forget: do NOT
+		// await, as that can cancel the in-flight inline completion request.
+		if (config.useCopilotStyleNextEditPresentation) {
+			void hideSuggestWidget();
+		}
+
 		const cursorOffset = document.offsetAt(position);
 		const startPosition = document.positionAt(result.startIndex);
 		const endPosition = document.positionAt(result.endIndex);

@@ -166,6 +166,13 @@ function parseMarkerSpan(
 	const startLine = boundaryLines[start.num - 1];
 	const endLine = boundaryLines[endMarkerNum - 1];
 	if (startLine === undefined || endLine === undefined || endLine < startLine) {
+		logger.debug("zeta2.1 marker span rejected: boundary line out of range", {
+			startMarker: start.num,
+			endMarker: endMarkerNum,
+			boundaryCount: boundaryLines.length,
+			startLine,
+			endLine,
+		});
 		return null;
 	}
 
@@ -235,11 +242,19 @@ function buildRegionResponse(
 		.map((l) => l.content);
 
 	if (trimRight(newLines.join("\n")) === trimRight(oldLines.join("\n"))) {
+		logger.debug("zeta2.1 region response is a no-op after line compare", {
+			region: `${region.startLine}-${region.endLine}`,
+		});
 		return null;
 	}
 
 	const trimmed = trimCommonEnds(oldLines, newLines);
-	if (trimmed === null) return null;
+	if (trimmed === null) {
+		logger.debug("zeta2.1 region response rejected: no common ends", {
+			region: `${region.startLine}-${region.endLine}`,
+		});
+		return null;
+	}
 
 	const { skipPrefix, oldMiddle, newMiddle } = trimmed;
 	const startLineIdx = region.startLine + skipPrefix;

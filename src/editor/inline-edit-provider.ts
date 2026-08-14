@@ -340,7 +340,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		position: vscode.Position,
 		context: vscode.InlineCompletionContext,
 		token: vscode.CancellationToken,
-	): Promise<vscode.InlineCompletionList | undefined> {
+	): vscode.InlineCompletionList | undefined {
 		const requestId = ++this.requestCounter;
 		this.latestRequestId = requestId;
 
@@ -417,10 +417,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 			`provider invoked req=${requestId} line=${position.line} char=${position.character}`,
 		);
 		if (this.shouldConsumeQueuedSuggestion) {
-			const queuedItems = await this.consumeQueuedSuggestion(
-				document,
-				position,
-			);
+			const queuedItems = this.consumeQueuedSuggestion(document, position);
 			if (queuedItems) {
 				return queuedItems;
 			}
@@ -654,7 +651,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 					count: copilotResults.length,
 					id: firstCopilotResult.result.id,
 				});
-				return await this.buildCompletionItem(
+				return this.buildCompletionItem(
 					document,
 					position,
 					firstCopilotResult.result,
@@ -666,7 +663,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 
 			if (renderMode === "JUMP" && jumpResult) {
 				if (config.useCopilotStyleNextEditPresentation) {
-					const proposedInlineEdit = await this.buildCompletionItem(
+					const proposedInlineEdit = this.buildCompletionItem(
 						document,
 						position,
 						jumpResult,
@@ -719,11 +716,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 				firstEditStartLine: document.positionAt(firstInlineResult.startIndex)
 					.line,
 			});
-			return await this.buildCompletionItem(
-				document,
-				position,
-				firstInlineResult,
-			);
+			return this.buildCompletionItem(document, position, firstInlineResult);
 		} catch (error) {
 			if ((error as Error).name === "AbortError") {
 				return undefined;
@@ -870,16 +863,19 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		return requestId === this.latestRequestId;
 	}
 
-	private async buildCompletionItem(
+	private buildCompletionItem(
 		document: vscode.TextDocument,
 		position: vscode.Position,
 		result: AutocompleteResult,
 		options: CompletionItemBuildOptions = {},
-	): Promise<vscode.InlineCompletionList | undefined> {
-		// Let the suggest widget and NES ghost text coexist. The user
-		// can suppress the suggest widget via editor.inlineSuggest.suppressSuggestions
-		// if they want Tab to always go to NES first.
-		// No hideSuggestWidget call here.
+	): vscode.InlineCompletionList | undefined {
+		// Fire-and-forget close of the suggest widget: if it's visible it
+		// would block the ghost text. Do NOT await — that delays the
+		// completion and can cause the request to be cancelled by a
+		// subsequent keystroke.
+		if (config.useCopilotStyleNextEditPresentation) {
+			void hideSuggestWidget();
+		}
 
 		const cursorOffset = document.offsetAt(position);
 		const startPosition = document.positionAt(result.startIndex);
@@ -1352,10 +1348,10 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		}
 	}
 
-	private async consumeQueuedSuggestion(
+	private consumeQueuedSuggestion(
 		document: vscode.TextDocument,
 		position: vscode.Position,
-	): Promise<vscode.InlineCompletionList | undefined> {
+	): vscode.InlineCompletionList | undefined {
 		const queue = this.queuedSuggestions;
 		if (!queue || queue.suggestions.length === 0) return undefined;
 		const uri = document.uri.toString();
@@ -1385,7 +1381,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 					remaining: queue.suggestions.length,
 				});
 				if (config.useCopilotStyleNextEditPresentation) {
-					const proposedInlineEdit = await this.buildCompletionItem(
+					const proposedInlineEdit = this.buildCompletionItem(
 						document,
 						position,
 						normalized,
@@ -1406,7 +1402,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 				remaining: queue.suggestions.length,
 			});
 			this.shouldConsumeQueuedSuggestion = false;
-			return await this.buildCompletionItem(document, position, normalized);
+			return this.buildCompletionItem(document, position, normalized);
 		}
 
 		this.clearSuggestionQueue("queue exhausted");

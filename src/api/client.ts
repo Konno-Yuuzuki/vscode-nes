@@ -41,8 +41,6 @@ import {
 	type RecentChange,
 	type UserAction,
 } from "./schemas.ts";
-import { buildSweepResponse } from "./sweep-completion.ts";
-import { buildSweepPrompt, selectSweepBroadWindow } from "./sweep-prompt.ts";
 import {
 	formatSymbolOutline,
 	type OutlineSymbolLike,
@@ -154,8 +152,6 @@ export function excludeSweepBroadWindowChanges(
 	cursorLine: number,
 	editableTokens: number,
 ): RecentChange[] {
-	const broadWindow = selectSweepBroadWindow(lines, cursorLine, editableTokens);
-	const startLine = broadWindow.start + 1;
 	const endLine = broadWindow.end;
 	return changes.filter((change) => {
 		if (toUnixPath(change.path) !== activeFilePath) return true;
@@ -483,8 +479,7 @@ export class ApiClient {
 			if (format === "zeta2" || format === "zeta2.1") {
 				responses = buildZeta2Response(completion, prompt, id);
 			} else {
-				const single = buildSweepResponse(completion, prompt, id);
-				responses = single ? [single] : null;
+								responses = single ? [single] : null;
 			}
 			if (!responses) return null;
 

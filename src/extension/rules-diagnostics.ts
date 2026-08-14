@@ -43,7 +43,7 @@ export class RulesDiagnostics implements vscode.Disposable {
 			vscode.workspace.onDidChangeTextDocument((e) => this.refresh(e.document)),
 			vscode.workspace.onDidCloseTextDocument((doc) => this.clear(doc)),
 			vscode.workspace.onDidChangeConfiguration((e) => {
-				if (!e.affectsConfiguration("sweep.rulesMaxChars")) return;
+				if (!e.affectsConfiguration("zeta.rulesMaxChars")) return;
 				for (const doc of vscode.workspace.textDocuments) this.refresh(doc);
 			}),
 			vscode.window.onDidChangeVisibleTextEditors(() =>

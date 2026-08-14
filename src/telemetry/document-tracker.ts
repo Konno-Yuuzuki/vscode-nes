@@ -9,14 +9,14 @@ import { utf8ByteOffsetAt } from "~/utils/text.ts";
 
 // Persistence key in workspaceState. Bumping the suffix retires old
 // blobs — load() migrates from LEGACY_STATE_KEY_V1 when present.
-const STATE_KEY = "sweep.tracker.v2";
-const LEGACY_STATE_KEY_V1 = "sweep.tracker.v1";
+const STATE_KEY = "zeta.tracker.v2";
+const LEGACY_STATE_KEY_V1 = "zeta.tracker.v1";
 
 // Schemes we treat as real editing surfaces. Everything else — Output
 // panel (`output:`), SCM diff editors (`vscode-scm:`), settings.json
 // (`vscode-userdata:`), git history views (`git:`), search results,
 // notebook scratchpads, etc. — is ignored so it doesn't show up as a
-// "recent file" in the prompt (e.g. `<|file_sep|>SR-team.nesweep.NESweep.log`
+// "recent file" in the prompt (e.g. `<|file_sep|>SR-team.nezeta.NESweep.log`
 // when the user peeks at the Output panel).
 const TRACKABLE_SCHEMES = new Set(["file", "untitled", "vscode-remote"]);
 

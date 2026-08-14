@@ -2,7 +2,6 @@ import * as vscode from "vscode";
 import type { ApiClient, AutocompleteInput } from "~/api/client.ts";
 import { detectModelFormat } from "~/api/model-format.ts";
 import type { AutocompleteResult } from "~/api/schemas.ts";
-import { selectSweepEditWindow } from "~/api/sweep-prompt.ts";
 import { selectZetaCursorWindowFromLineProvider } from "~/api/zeta2-prompt.ts";
 import { config } from "~/core/config";
 import { JUMP_RETRIGGER_DELAY_MS } from "~/core/constants.ts";
@@ -977,7 +976,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		}
 		item.command = {
 			title: "Accept Sweep Inline Edit",
-			command: "sweep.acceptInlineEdit",
+			command: "zeta.acceptInlineEdit",
 			arguments: [acceptedSuggestion],
 		};
 		if (useProposedInlineEditPresentation) {
@@ -1008,12 +1007,15 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		let startLine: number;
 		let endLine: number;
 		if (format === "sweep") {
-			const window = selectSweepEditWindow(
+			const window = selectZetaCursorWindowFromLineProvider(
 				document.lineCount,
 				snapshot.position.line,
+				config.editableTokens,
+				config.zetaContextTokens,
+				(line) => document.lineAt(line).text,
 			);
-			startLine = window.start;
-			endLine = window.end;
+			startLine = window.editableStart;
+			endLine = window.editableEnd;
 		} else {
 			const window = selectZetaCursorWindowFromLineProvider(
 				document.lineCount,

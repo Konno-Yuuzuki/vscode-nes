@@ -7,7 +7,7 @@ import type {
 	ModelPrompt,
 	PromptLine,
 } from "~/api/model-format.ts";
-import { computeLineByteOffsets, splitLines } from "~/api/sweep-prompt.ts";
+import { computeLineByteOffsets, splitLines } from "~/api/prompt-utils.ts";
 import { buildZeta2Response } from "~/api/zeta2-completion.ts";
 import { ZETA2_1_EOS_MARKER } from "~/api/zeta2-prompt.ts";
 

@@ -9,7 +9,7 @@
 // they're handled by the same builder/parser parameterised on the
 // protocol version (see zeta2-prompt.ts).
 
-export type ModelFormat = "sweep" | "zeta2" | "zeta2.1";
+export type ModelFormat = "zeta2" | "zeta2.1";
 
 export interface PromptLine {
 	startByte: number;
@@ -110,5 +110,5 @@ export function detectModelFormat(modelName: string): ModelFormat {
 	) {
 		return "zeta2";
 	}
-	return "sweep";
+	return "zeta2";
 }

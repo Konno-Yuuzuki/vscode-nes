@@ -3,10 +3,6 @@ import { describe, expect, test } from "bun:test";
 import { detectModelFormat } from "~/api/model-format.ts";
 import type { AutocompleteRequest } from "~/api/schemas.ts";
 import {
-	buildSweepPrompt,
-	selectSweepBroadWindow,
-} from "~/api/sweep-prompt.ts";
-import {
 	buildZeta2Prompt,
 	selectZetaCursorWindowFromLineProvider,
 	ZETA2_1_EOS_MARKER,
@@ -42,9 +38,9 @@ function makeRequest(
 }
 
 describe("detectModelFormat", () => {
-	test("default (sweep) for unknown names", () => {
-		expect(detectModelFormat("sweepai/sweep-next-edit")).toBe("sweep");
-		expect(detectModelFormat("foo/bar-baz")).toBe("sweep");
+	test("default (zeta2) for unknown names", () => {
+		expect(detectModelFormat("zeta-edit-prediction")).toBe("zeta2");
+		expect(detectModelFormat("foo/bar-baz")).toBe("zeta2");
 	});
 
 	test("matches zeta2 family by substring", () => {
@@ -60,60 +56,6 @@ describe("detectModelFormat", () => {
 		expect(detectModelFormat("zeta2.1-q4")).toBe("zeta2.1");
 		expect(detectModelFormat("zeta-2-1")).toBe("zeta2.1");
 		expect(detectModelFormat("Zeta_2_1")).toBe("zeta2.1");
-	});
-});
-
-describe("buildSweepPrompt", () => {
-	test("emits <|file_sep|> sections, <|cursor|> marker, sweep stop tokens", () => {
-		const result = buildSweepPrompt(makeRequest());
-		expect(result.format).toBe("sweep");
-		expect(result.stopTokens).toEqual(["<|file_sep|>", "<|endoftext|>"]);
-		expect(result.prompt).toContain("<|file_sep|>src/foo.ts");
-		expect(result.prompt).toContain("<|file_sep|>original/src/foo.ts");
-		expect(result.prompt).toContain("<|file_sep|>current/src/foo.ts");
-		expect(result.prompt).toContain("<|file_sep|>updated/src/foo.ts");
-		expect(result.prompt).toContain("<|cursor|>");
-	});
-
-	test("uses a 2:1 before/after token budget for Sweep broad context", () => {
-		const lines = Array.from({ length: 100 }, () => "x".repeat(19));
-		const window = selectSweepBroadWindow(lines, 50, 30);
-
-		// 30 estimated tokens = 90 bytes. Each non-final line is 20 bytes,
-		// so two preceding lines plus the cursor line consume the 60-byte
-		// before allocation and one following line consumes the 30-byte tail.
-		expect(window).toEqual({ start: 48, end: 52 });
-	});
-
-	test("places broad context before volatile retrieval, outline and diagnostics", () => {
-		const result = buildSweepPrompt(
-			makeRequest({
-				retrieval_chunks: [
-					{
-						file_path: "src/other.ts",
-						start_line: 1,
-						end_line: 1,
-						content: "const stable = true;",
-						timestamp: 1,
-					},
-				],
-				recent_changes: "File: src/foo.ts:\n@@\n-old\n+new",
-				symbol_outline:
-					"active_symbol: Demo::run\nnearby_functions:\n- line 10: Demo::run [active]",
-			}),
-		);
-		const retrieval = result.prompt.indexOf("<|file_sep|>context/retrieval");
-		const outline = result.prompt.indexOf("<|file_sep|>context/outline");
-		const diff = result.prompt.indexOf("<|file_sep|>recent_changes");
-		const active = result.prompt.indexOf("<|file_sep|>src/foo.ts");
-		const original = result.prompt.indexOf("<|file_sep|>original/src/foo.ts");
-		expect(retrieval).toBeGreaterThanOrEqual(0);
-		expect(diff).toBeGreaterThanOrEqual(0);
-		expect(active).toBeGreaterThan(diff);
-		expect(retrieval).toBeGreaterThan(active);
-		expect(outline).toBeGreaterThan(retrieval);
-		expect(original).toBeGreaterThan(outline);
-		expect(result.contextStats?.outline).toBeGreaterThan(0);
 	});
 });
 
@@ -260,24 +202,28 @@ describe("buildZeta2Prompt", () => {
 						start_line: 40,
 						end_line: 42,
 						content: "overlapping current-file retrieval",
+						timestamp: 1,
 					},
 					{
 						file_path: "src/foo.ts",
 						start_line: 1,
 						end_line: 3,
 						content: "far current-file definition",
+						timestamp: 1,
 					},
 					{
 						file_path: "src/types.ts",
 						start_line: 10,
 						end_line: 12,
 						content: "external LSP definition",
+						timestamp: 1,
 					},
 					{
 						file_path: "clipboard.txt",
 						start_line: 1,
 						end_line: 1,
 						content: "clipboard context",
+						timestamp: 1,
 					},
 				],
 				file_chunks: [
@@ -286,6 +232,7 @@ describe("buildZeta2Prompt", () => {
 						start_line: 1,
 						end_line: 2,
 						content: "recent visible buffer",
+						timestamp: 1,
 					},
 				],
 			}),
@@ -362,14 +309,11 @@ describe("buildZeta2Prompt", () => {
 		expect(result.format).toBe("zeta2.1");
 		expect(result.stopTokens).toEqual([ZETA2_1_EOS_MARKER]);
 
-		// This short excerpt has two numbered boundaries and no git-conflict
-		// scaffolding.
 		expect(result.prompt).toContain("<|marker_1|>\n");
 		expect(result.prompt).toContain("<|marker_2|>\n");
 		expect(result.prompt).not.toContain(ZETA2_CURRENT_MARKER);
 		expect(result.prompt).not.toContain(ZETA2_SEPARATOR);
 
-		// Order: <|marker_1|> ... <|user_cursor|> ... <|marker_2|> ... <[fim-middle]>
 		const m1 = result.prompt.indexOf("<|marker_1|>\n");
 		const cursorIdx = result.prompt.indexOf(ZETA2_CURSOR_MARKER);
 		const m2 = result.prompt.indexOf("<|marker_2|>\n");
@@ -416,9 +360,6 @@ describe("buildZeta2Prompt", () => {
 			},
 		);
 
-		// Editable range is [25, 56). With no blank lines, V0318 inserts a
-		// hard boundary after 16 lines: 25, 41, 56. The diagnostic on line 5
-		// remains context and does not create an editable region.
 		expect(result.regions).toEqual([
 			{ startLine: 25, endLine: 56, isPrimary: true },
 		]);
@@ -436,8 +377,6 @@ describe("buildZeta2Prompt", () => {
 			{ length: 50 },
 			(_, i) => `${i.toString().padStart(2, "0")}:${"x".repeat(16)}`,
 		);
-		// Cursor line 25 gives editable range [10, 41). A blank line at
-		// relative row 7 makes line 18 a preferred block start.
 		lines[17] = "";
 		const fileContents = `${lines.join("\n")}\n`;
 		const cursorPosition = lines.slice(0, 25).join("\n").length + 1;
@@ -479,7 +418,6 @@ describe("buildZeta2Prompt", () => {
 			},
 		);
 
-		// Five editable lines plus four surrounding context lines.
 		expect(result.prompt).toContain(`${lines[46]}\n`);
 		expect(result.prompt).toContain(`${lines[54]}\n`);
 		expect(result.prompt).not.toContain(`${lines[45]}\n`);

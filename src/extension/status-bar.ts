@@ -30,14 +30,14 @@ export class SweepStatusBar implements vscode.Disposable {
 			vscode.StatusBarAlignment.Right,
 			100,
 		);
-		this.statusBarItem.command = "sweep.showMenu";
+		this.statusBarItem.command = "zeta.showMenu";
 		this.updateStatusBar();
 
 		this.disposables.push(
 			vscode.workspace.onDidChangeConfiguration((e) => {
 				if (
-					e.affectsConfiguration("sweep.enabled") ||
-					e.affectsConfiguration("sweep.autocompleteSnoozeUntil")
+					e.affectsConfiguration("zeta.enabled") ||
+					e.affectsConfiguration("zeta.autocompleteSnoozeUntil")
 				) {
 					this.updateStatusBar();
 				}
@@ -111,7 +111,7 @@ export function registerStatusBarCommands(
 	const disposables: vscode.Disposable[] = [];
 
 	disposables.push(
-		vscode.commands.registerCommand("sweep.showMenu", async () => {
+		vscode.commands.registerCommand("zeta.showMenu", async () => {
 			const isEnabled = config.enabled;
 			const isSnoozed = config.isAutocompleteSnoozed();
 
@@ -172,7 +172,7 @@ export function registerStatusBarCommands(
 			if (selection) {
 				switch (selection.action) {
 					case "toggleEnabled":
-						await vscode.commands.executeCommand("sweep.toggleEnabled");
+						await vscode.commands.executeCommand("zeta.toggleEnabled");
 						break;
 					case "snooze":
 						await handleSnooze();
@@ -199,7 +199,7 @@ export function registerStatusBarCommands(
 	);
 
 	disposables.push(
-		vscode.commands.registerCommand("sweep.toggleEnabled", async () => {
+		vscode.commands.registerCommand("zeta.toggleEnabled", async () => {
 			const inspection = config.inspect<boolean>("enabled");
 			const current =
 				inspection?.workspaceValue ??

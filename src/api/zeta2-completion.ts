@@ -15,7 +15,7 @@ import { logger } from "~/core/logger.ts";
 import type { CompletionResult } from "./completion-client.ts";
 import type { EditRegion, ModelPrompt } from "./model-format.ts";
 import type { AutocompleteResponse } from "./schemas.ts";
-import { stripInjectedFixmesFromLines } from "./sweep-completion.ts";
+import { stripInjectedFixmesFromLines } from "./prompt-utils.ts";
 import {
 	ZETA2_1_EOS_MARKER,
 	ZETA2_CURSOR_MARKER,

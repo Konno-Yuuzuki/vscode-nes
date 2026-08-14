@@ -17,7 +17,7 @@ import {
 	MODEL_NAME,
 } from "~/core/constants.ts";
 
-const SWEEP_CONFIG_SECTION = "sweep";
+const ZETA_CONFIG_SECTION = "zeta";
 
 export interface MessageTransform {
 	pattern: string;
@@ -27,7 +27,7 @@ export interface MessageTransform {
 
 export class SweepConfig {
 	private get config(): vscode.WorkspaceConfiguration {
-		return vscode.workspace.getConfiguration(SWEEP_CONFIG_SECTION);
+		return vscode.workspace.getConfiguration(ZETA_CONFIG_SECTION);
 	}
 
 	get enabled(): boolean {
@@ -115,10 +115,7 @@ export class SweepConfig {
 		return this.config.get<string>("serverUrl", DEFAULT_SERVER_URL);
 	}
 
-	get modelName(): string {
-		return this.config.get<string>("modelName", MODEL_NAME);
-	}
-
+	
 	get completionTimeoutMs(): number {
 		return this.config.get<number>(
 			"completionTimeoutMs",

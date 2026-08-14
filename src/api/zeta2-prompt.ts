@@ -71,7 +71,7 @@ import {
 	normalizeDiagnosticMessage,
 	renderDiagnosticsAsComments,
 	splitLines,
-} from "./sweep-prompt.ts";
+} from "./prompt-utils.ts";
 
 export const ZETA2_STOP_TOKENS = [">>>>>>> UPDATED\n", ">>>>>>> UPDATED"];
 export const ZETA2_1_EOS_MARKER = "<[end▁of▁sentence]>";

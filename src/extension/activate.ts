@@ -240,36 +240,36 @@ export function activate(context: vscode.ExtensionContext) {
 	);
 
 	const triggerCommand = vscode.commands.registerCommand(
-		"sweep.triggerNextEdit",
+		"zeta.triggerNextEdit",
 		() => {
 			vscode.commands.executeCommand("editor.action.inlineEdit.trigger");
 		},
 	);
 
 	const acceptJumpEditCommand = vscode.commands.registerCommand(
-		"sweep.acceptJumpEdit",
+		"zeta.acceptJumpEdit",
 		() => jumpEditManager.acceptJumpEdit(),
 	);
 
 	const acceptJumpEditLineCommand = vscode.commands.registerCommand(
-		"sweep.acceptJumpEditLine",
+		"zeta.acceptJumpEditLine",
 		() => jumpEditManager.acceptJumpEditLine(),
 	);
 
 	const acceptInlineEditCommand = vscode.commands.registerCommand(
-		"sweep.acceptInlineEdit",
+		"zeta.acceptInlineEdit",
 		(acceptedSuggestion: AcceptedInlineSuggestion | undefined) => {
 			provider.handleInlineAccept(acceptedSuggestion);
 		},
 	);
 
 	const dismissJumpEditCommand = vscode.commands.registerCommand(
-		"sweep.dismissJumpEdit",
+		"zeta.dismissJumpEdit",
 		() => jumpEditManager.dismissJumpEdit(),
 	);
 
 	const enableProposedApiCommand = vscode.commands.registerCommand(
-		"sweep.enableProposedApi",
+		"zeta.enableProposedApi",
 		() => enableProposedApi(),
 	);
 
@@ -295,7 +295,7 @@ export function activate(context: vscode.ExtensionContext) {
 	const themeConfigListener = vscode.workspace.onDidChangeConfiguration(
 		(event) => {
 			if (
-				event.affectsConfiguration("sweep.useCopilotStyleNextEditPresentation")
+				event.affectsConfiguration("zeta.useCopilotStyleNextEditPresentation")
 			) {
 				if (config.useCopilotStyleNextEditPresentation) {
 					maybeWarnAboutCopilotStylePresentation();
@@ -417,7 +417,7 @@ class ErrorMonitor {
 			origError(...args);
 		};
 		this.disposable = vscode.commands.registerCommand(
-			"sweep.showErrorLog",
+			"zeta.showErrorLog",
 			() => this.show(),
 		);
 	}

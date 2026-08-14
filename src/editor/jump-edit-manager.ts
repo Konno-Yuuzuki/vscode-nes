@@ -185,7 +185,7 @@ export class JumpEditManager implements vscode.Disposable {
 		};
 
 		this.applyDecorations(editor, document);
-		vscode.commands.executeCommand("setContext", "sweep.hasJumpEdit", true);
+		vscode.commands.executeCommand("setContext", "zeta.hasJumpEdit", true);
 	}
 
 	handleCursorMove(position: vscode.Position): void {
@@ -665,7 +665,7 @@ export class JumpEditManager implements vscode.Disposable {
 		const hadPending = this.pendingJumpEdit !== null;
 		this.pendingJumpEdit = null;
 		this.clearDecorations();
-		vscode.commands.executeCommand("setContext", "sweep.hasJumpEdit", false);
+		vscode.commands.executeCommand("setContext", "zeta.hasJumpEdit", false);
 		if (hadPending) {
 			logger.debug("Jump edit state cleared");
 		}

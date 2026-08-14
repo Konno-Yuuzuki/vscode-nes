@@ -66,6 +66,7 @@ export class CompletionClient {
 		const port =
 			parseInt(url.port, 10) || (url.protocol === "https:" ? 443 : 80);
 
+
 		const result: CompletionResult = {
 			text: "",
 			finishReason: "stop",

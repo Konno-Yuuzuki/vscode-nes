@@ -347,6 +347,10 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		if (!config.enabled) return undefined;
 		if (config.isAutocompleteSnoozed()) return undefined;
 
+		logger.trace(
+			`provider entry req=${requestId} lang=${document.languageId} line=${position.line} char=${position.character} trigger=${context.triggerKind}`,
+		);
+
 		// Do NOT hide the suggest widget here. VS Code re-opens a closed
 		// suggest widget immediately for ini/toml/conf files (key=value
 		// suggestions), which triggers the provider again → infinite loop.
@@ -413,7 +417,10 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 			`provider invoked req=${requestId} line=${position.line} char=${position.character}`,
 		);
 		if (this.shouldConsumeQueuedSuggestion) {
-			const queuedItems = this.consumeQueuedSuggestion(document, position);
+			const queuedItems = await this.consumeQueuedSuggestion(
+				document,
+				position,
+			);
 			if (queuedItems) {
 				return queuedItems;
 			}
@@ -647,7 +654,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 					count: copilotResults.length,
 					id: firstCopilotResult.result.id,
 				});
-				return this.buildCompletionItem(
+				return await this.buildCompletionItem(
 					document,
 					position,
 					firstCopilotResult.result,
@@ -659,7 +666,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 
 			if (renderMode === "JUMP" && jumpResult) {
 				if (config.useCopilotStyleNextEditPresentation) {
-					const proposedInlineEdit = this.buildCompletionItem(
+					const proposedInlineEdit = await this.buildCompletionItem(
 						document,
 						position,
 						jumpResult,
@@ -712,7 +719,11 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 				firstEditStartLine: document.positionAt(firstInlineResult.startIndex)
 					.line,
 			});
-			return this.buildCompletionItem(document, position, firstInlineResult);
+			return await this.buildCompletionItem(
+				document,
+				position,
+				firstInlineResult,
+			);
 		} catch (error) {
 			if ((error as Error).name === "AbortError") {
 				return undefined;
@@ -859,18 +870,16 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		return requestId === this.latestRequestId;
 	}
 
-	private buildCompletionItem(
+	private async buildCompletionItem(
 		document: vscode.TextDocument,
 		position: vscode.Position,
 		result: AutocompleteResult,
 		options: CompletionItemBuildOptions = {},
-	): vscode.InlineCompletionList | undefined {
-		// A valid completion is being rendered — close any open suggest
-		// widget so the ghost text is not obscured. Fire-and-forget: do NOT
-		// await, as that can cancel the in-flight inline completion request.
-		if (config.useCopilotStyleNextEditPresentation) {
-			void hideSuggestWidget();
-		}
+	): Promise<vscode.InlineCompletionList | undefined> {
+		// Let the suggest widget and NES ghost text coexist. The user
+		// can suppress the suggest widget via editor.inlineSuggest.suppressSuggestions
+		// if they want Tab to always go to NES first.
+		// No hideSuggestWidget call here.
 
 		const cursorOffset = document.offsetAt(position);
 		const startPosition = document.positionAt(result.startIndex);
@@ -1343,10 +1352,10 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		}
 	}
 
-	private consumeQueuedSuggestion(
+	private async consumeQueuedSuggestion(
 		document: vscode.TextDocument,
 		position: vscode.Position,
-	): vscode.InlineCompletionList | undefined {
+	): Promise<vscode.InlineCompletionList | undefined> {
 		const queue = this.queuedSuggestions;
 		if (!queue || queue.suggestions.length === 0) return undefined;
 		const uri = document.uri.toString();
@@ -1376,7 +1385,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 					remaining: queue.suggestions.length,
 				});
 				if (config.useCopilotStyleNextEditPresentation) {
-					const proposedInlineEdit = this.buildCompletionItem(
+					const proposedInlineEdit = await this.buildCompletionItem(
 						document,
 						position,
 						normalized,
@@ -1397,7 +1406,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 				remaining: queue.suggestions.length,
 			});
 			this.shouldConsumeQueuedSuggestion = false;
-			return this.buildCompletionItem(document, position, normalized);
+			return await this.buildCompletionItem(document, position, normalized);
 		}
 
 		this.clearSuggestionQueue("queue exhausted");

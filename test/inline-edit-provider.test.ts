@@ -33,7 +33,7 @@ function makeOneLineDocument(
 	} as unknown as vscode.TextDocument;
 }
 
-function buildItem(
+async function buildItem(
 	document: vscode.TextDocument,
 	position: vscode.Position,
 	result: AutocompleteResult,
@@ -50,11 +50,12 @@ function buildItem(
 			position: vscode.Position,
 			result: AutocompleteResult,
 			options?: { useProposedInlineEditPresentation?: boolean },
-		) => vscode.InlineCompletionList | undefined;
+		) => Promise<vscode.InlineCompletionList | undefined>;
 	};
 
-	return provider.buildCompletionItem(document, position, result, options)
-		?.items[0];
+	return (
+		await provider.buildCompletionItem(document, position, result, options)
+	)?.items[0];
 }
 
 function normalizeResult(
@@ -207,39 +208,47 @@ describe("InlineEditProvider cursor context retrigger", () => {
 });
 
 describe("InlineEditProvider buildCompletionItem", () => {
-	test("sets filterText when replacing text that is not a prefix of the completion", () => {
+	test("sets filterText when replacing text that is not a prefix of the completion", async () => {
 		const text = "const value = oldCall();";
 		const cursorOffset = "const value = ".length;
 		const document = makeOneLineDocument(text);
 
-		const item = buildItem(document, new vscode.Position(0, cursorOffset), {
-			id: "non-prefix-replacement",
-			startIndex: cursorOffset,
-			endIndex: text.length,
-			completion: "newCall()",
-			confidence: 0.8,
-		});
+		const item = await buildItem(
+			document,
+			new vscode.Position(0, cursorOffset),
+			{
+				id: "non-prefix-replacement",
+				startIndex: cursorOffset,
+				endIndex: text.length,
+				completion: "newCall()",
+				confidence: 0.8,
+			},
+		);
 
 		expect(item?.filterText).toBe("oldCall();");
 	});
 
-	test("leaves filterText unset when replaced text is already a prefix", () => {
+	test("leaves filterText unset when replaced text is already a prefix", async () => {
 		const text = "const value = high";
 		const cursorOffset = "const value = ".length;
 		const document = makeOneLineDocument(text);
 
-		const item = buildItem(document, new vscode.Position(0, cursorOffset), {
-			id: "prefix-replacement",
-			startIndex: cursorOffset,
-			endIndex: text.length,
-			completion: "highWatermark",
-			confidence: 0.8,
-		});
+		const item = await buildItem(
+			document,
+			new vscode.Position(0, cursorOffset),
+			{
+				id: "prefix-replacement",
+				startIndex: cursorOffset,
+				endIndex: text.length,
+				completion: "highWatermark",
+				confidence: 0.8,
+			},
+		);
 
 		expect(item?.filterText).toBeUndefined();
 	});
 
-	test("can render edits before the cursor as proposed inline edits when enabled", () => {
+	test("can render edits before the cursor as proposed inline edits when enabled", async () => {
 		setMockConfiguration({
 			useCopilotStyleNextEditPresentation: true,
 		});
@@ -248,7 +257,7 @@ describe("InlineEditProvider buildCompletionItem", () => {
 		const endIndex = "const value = oldValue".length;
 		const document = makeOneLineDocument(text);
 
-		const item = buildItem(
+		const item = (await buildItem(
 			document,
 			new vscode.Position(0, text.length),
 			{
@@ -259,7 +268,7 @@ describe("InlineEditProvider buildCompletionItem", () => {
 				confidence: 0.8,
 			},
 			{ useProposedInlineEditPresentation: true },
-		) as vscode.InlineCompletionItem & {
+		)) as vscode.InlineCompletionItem & {
 			isInlineEdit?: boolean;
 			showInlineEditMenu?: boolean;
 			showRange?: vscode.Range;
@@ -273,7 +282,7 @@ describe("InlineEditProvider buildCompletionItem", () => {
 		expect(applyOneLineItem(text, item)).toBe("const value = newValue;");
 	});
 
-	test("uses plain text for proposed replacements with a cursor target", () => {
+	test("uses plain text for proposed replacements with a cursor target", async () => {
 		setMockConfiguration({
 			useCopilotStyleNextEditPresentation: true,
 		});
@@ -282,7 +291,7 @@ describe("InlineEditProvider buildCompletionItem", () => {
 		const completion = '");';
 		const document = makeOneLineDocument(text);
 
-		const item = buildItem(
+		const item = (await buildItem(
 			document,
 			new vscode.Position(0, prefix.length),
 			{
@@ -294,7 +303,7 @@ describe("InlineEditProvider buildCompletionItem", () => {
 				cursorTargetOffset: 0,
 			},
 			{ useProposedInlineEditPresentation: true },
-		) as vscode.InlineCompletionItem & { isInlineEdit?: boolean };
+		)) as vscode.InlineCompletionItem & { isInlineEdit?: boolean };
 
 		expect(item?.isInlineEdit).toBe(true);
 		expect(typeof item?.insertText).toBe("string");
@@ -306,14 +315,14 @@ describe("InlineEditProvider buildCompletionItem", () => {
 		expect(accepted?.uri).toBe(document.uri.toString());
 	});
 
-	test("uses the custom jump fallback by default", () => {
+	test("uses the custom jump fallback by default", async () => {
 		const text = "const value = oldValue;";
 		const startIndex = "const value = ".length;
 		const endIndex = "const value = oldValue".length;
 		const document = makeOneLineDocument(text);
 		let fallbackResult: AutocompleteResult | undefined;
 
-		const item = buildItem(
+		const item = await buildItem(
 			document,
 			new vscode.Position(0, text.length),
 			{
@@ -526,7 +535,7 @@ describe("InlineEditProvider normalizeInlineResult", () => {
 		expect(accepted).not.toContain("NewCodeCode");
 	});
 
-	test("preserves an empty completion when it deletes a non-empty range", () => {
+	test("preserves an empty completion when it deletes a non-empty range", async () => {
 		setMockConfiguration({
 			useCopilotStyleNextEditPresentation: true,
 		});
@@ -555,12 +564,12 @@ describe("InlineEditProvider normalizeInlineResult", () => {
 			text.slice(normalized.endIndex);
 		expect(accepted).toBe("keep ");
 
-		const item = buildItem(
+		const item = (await buildItem(
 			document,
 			new vscode.Position(0, startIndex),
 			normalized,
 			{ useProposedInlineEditPresentation: true },
-		) as vscode.InlineCompletionItem & { isInlineEdit?: boolean };
+		)) as vscode.InlineCompletionItem & { isInlineEdit?: boolean };
 		expect(item?.isInlineEdit).toBe(true);
 		expect(applyOneLineItem(text, item)).toBe("keep ");
 	});

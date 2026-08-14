@@ -474,7 +474,7 @@ export class ApiClient {
 			);
 			logger.trace("← /v1/completions raw response:", completion.text);
 
-			const id = `nesweep-${Date.now()}-${++this.idCounter}`;
+			const id = `zeta-${Date.now()}-${++this.idCounter}`;
 			let responses: AutocompleteResponse[] | null;
 			if (format === "zeta2" || format === "zeta2.1") {
 				responses = buildZeta2Response(completion, prompt, id);
@@ -1145,9 +1145,9 @@ export class ApiClient {
 
 	getDebugInfo(): string {
 		const extensionVersion =
-			vscode.extensions.getExtension("sr-tream.nesweep")?.packageJSON
+			vscode.extensions.getExtension("sr-tream.zeta")?.packageJSON
 				?.version ?? "unknown";
-		return `VSCode (${vscode.version}) - OS: ${os.platform()} ${os.arch()} - NESweep v${extensionVersion}`;
+		return `VSCode (${vscode.version}) - OS: ${os.platform()} ${os.arch()} - Zeta v${extensionVersion}`;
 	}
 
 	private getRepoName(document: vscode.TextDocument): string {

@@ -10,10 +10,10 @@ import type { CompletionServer } from "~/services/completion-server.ts";
 // Cycle through the four loading frames every LOADING_FRAME_MS. ~600ms
 // per full cycle reads as activity without becoming distracting.
 const LOADING_FRAMES = [
-	"nesweep-load-1",
-	"nesweep-load-2",
-	"nesweep-load-3",
-	"nesweep-load-4",
+	"zeta-load-1",
+	"zeta-load-2",
+	"zeta-load-3",
+	"zeta-load-4",
 ];
 const LOADING_FRAME_MS = 150;
 
@@ -79,7 +79,7 @@ export class SweepStatusBar implements vscode.Disposable {
 	}
 
 	private applyText(loading: boolean): void {
-		const icon = loading ? LOADING_FRAMES[this.loadingIndex] : "nesweep-idle";
+		const icon = loading ? LOADING_FRAMES[this.loadingIndex] : "zeta-idle";
 		this.statusBarItem.text = `$(${icon})`;
 	}
 
@@ -89,7 +89,7 @@ export class SweepStatusBar implements vscode.Disposable {
 		const snoozeLine = isSnoozed
 			? `Snoozed Until: ${formatSnoozeTime(snoozeUntil)}`
 			: "Snoozed: Off";
-		return `NESweep\nStatus: ${status}\n${snoozeLine}\n\nClick to open menu`;
+		return `Zeta\nStatus: ${status}\n${snoozeLine}\n\nClick to open menu`;
 	}
 
 	dispose(): void {
@@ -165,8 +165,8 @@ export function registerStatusBarCommands(
 			}
 
 			const selection = await vscode.window.showQuickPick(items, {
-				placeHolder: "NESweep Settings",
-				title: "NESweep",
+				placeHolder: "Zeta Settings",
+				title: "Zeta",
 			});
 
 			if (selection) {
@@ -185,7 +185,7 @@ export function registerStatusBarCommands(
 							const ok = await completionServer.ensureReachable();
 							if (ok) {
 								vscode.window.showInformationMessage(
-									`NESweep server reachable at ${config.serverUrl}.`,
+									`Zeta server reachable at ${config.serverUrl}.`,
 								);
 							}
 						}
@@ -216,7 +216,7 @@ export function registerStatusBarCommands(
 			}
 
 			vscode.window.showInformationMessage(
-				`NESweep autocomplete ${!current ? "enabled" : "disabled"}`,
+				`Zeta autocomplete ${!current ? "enabled" : "disabled"}`,
 			);
 		}),
 	);
@@ -241,7 +241,7 @@ async function handleSnooze(): Promise<void> {
 			label: option.label,
 			description: `Pause autocomplete for ${option.label}`,
 		})),
-		{ title: "Snooze NESweep Autocomplete", placeHolder: "Choose duration" },
+		{ title: "Snooze Zeta Autocomplete", placeHolder: "Choose duration" },
 	);
 
 	if (!selection) return;
@@ -256,13 +256,13 @@ async function handleSnooze(): Promise<void> {
 	);
 	await vscode.commands.executeCommand("editor.action.inlineSuggest.hide");
 	vscode.window.showInformationMessage(
-		`NESweep autocomplete snoozed until ${formatSnoozeTime(until)}.`,
+		`Zeta autocomplete snoozed until ${formatSnoozeTime(until)}.`,
 	);
 }
 
 async function handleResumeSnooze(): Promise<void> {
 	await config.setAutocompleteSnoozeUntil(0, vscode.ConfigurationTarget.Global);
-	vscode.window.showInformationMessage("NESweep autocomplete resumed.");
+	vscode.window.showInformationMessage("Zeta autocomplete resumed.");
 }
 
 // Match the diagnostic's notion of "chars": UTF-16 code units, which

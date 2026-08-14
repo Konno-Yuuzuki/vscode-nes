@@ -1,11 +1,11 @@
-## NESweep — Next Edit autocompletion for VSCode
+## Zeta — Next Edit autocompletion for VSCode
 
 <img width="563" height="327" alt="image" src="https://github.com/user-attachments/assets/9a06ed4a-bf9b-41e0-a21b-2178cb2c67b9" />
 
-NESweep is a fork of [Sweep Next Edit](https://github.com/sweepai/vscode-nes)
+Zeta is a fork of [Sweep Next Edit](https://github.com/sweepai/vscode-nes)
 that retargets the extension at a local OpenAI-compatible
 `/v1/completions` server (e.g. llama.cpp's `llama-server`) running an
-edit-prediction model. The upstream `uvx sweep-autocomplete` Python
+edit-prediction model. The upstream `uvx zeta-autocomplete` Python
 child process — which falls back to CPU and is unusable for next-edit
 latency — is removed.
 
@@ -15,7 +15,7 @@ latency — is removed.
   any server you bring up (llama.cpp, vLLM, sglang, Ollama with the
   OpenAI shim).
 - **SweepAI + Zed Zeta-2 / Zeta-2.1 models.** Format auto-detected
-  from `sweep.modelName`. Zeta-2.1 uses Zed V0318-style numbered
+  from `zeta.modelName`. Zeta-2.1 uses Zed V0318-style numbered
   boundaries across one contiguous cursor-centered editable excerpt.
 - **Targeted related-code context.** LSP definitions/usages are preferred,
   including distant definitions in the active file; visible and recent
@@ -25,40 +25,40 @@ latency — is removed.
   suppression below a root-cause line, and user-configurable regex
   rewrites on the messages (clang / clang-tidy presets included).
 - **Per-language workspace rules.** `.vscode/nes-<languageId>.md`
-  is editable from the NESweep status-bar menu with a configurable
+  is editable from the Zeta status-bar menu with a configurable
   soft-cap warning when the file grows large enough to bloat latency.
 - **Cache-friendly + persistent.** Stable content emitted first /
   volatile last for maximum prefix-cache hits; recent files, edits,
   and cursor positions survive window reload via `workspaceState`,
   so the model has context immediately after restart.
 - **Status-bar menu + trace logging.** Toggle, snooze, ping server,
-  edit instructions. Set the NESweep output channel to `Trace`
-  (`Developer: Set Log Level… → NESweep`) for full request/response
+  edit instructions. Set the Zeta output channel to `Trace`
+  (`Developer: Set Log Level… → Zeta`) for full request/response
   visibility.
 
 ## Settings
 
 | Key | Default | Purpose |
 | --- | --- | --- |
-| `sweep.serverUrl` | `http://localhost:8080` | `/v1/completions` base URL |
-| `sweep.modelName` | `sweepai/sweep-next-edit` | `model` field in the request body; substring-matched to pick the prompt format |
-| `sweep.completionTimeoutMs` | `10000` | Per-request timeout (ms) |
-| `sweep.retriggerOnContextExit` | `false` | Opt in to requesting a completion after the cursor moves at least half the last model editable window, even with no text edit |
-| `sweep.contextExitRetriggerDebounceMs` | `1500` | Debounce for context-exit cursor retriggers, allowing navigation to settle; `0` uses the next event-loop turn |
-| `sweep.maxContextFiles` | `5` | Related excerpt cap; Zeta prioritizes LSP retrieval, then visible/recent buffers |
-| `sweep.outlineSymbols` | `0` | Optional nearby LSP symbols plus the active symbol path for every model. Includes methods, fields, enum members, and globals when provided; asynchronous and separate from `maxContextFiles`, a positive value opts in |
-| `sweep.maxRecentChangesChars` | `12000` | Character budget for formatted recent-edit history; `0` disables history |
-| `sweep.includeClipboardContext` | `true` | Include clipboard text as retrieval context; it is emitted last in retrieval |
-| `sweep.stableRetrievalOrdering` | `false` | Sort retrieval chunks deterministically to improve prefix-cache reuse |
-| `sweep.reuseIdenticalPromptResults` | `false` | Reuse recent temperature-0 results for byte-identical prompts |
-| `sweep.identicalPromptCacheTtlMs` | `5000` | TTL for identical-prompt result reuse |
-| `sweep.diagRadius` | `12` | ±N lines around cursor; `0` disables |
-| `sweep.editableTokens` | `2000` | Shared approximate active-file budget, estimated as UTF-8 bytes / 3 and snapped to whole lines. Sweep allocates 2/3 before and 1/3 after the cursor; Zeta uses it for its editable excerpt. |
-| `sweep.zetaContextTokens` | `150` | Approximate additional Zeta-2.1 current-file context budget, using the same tokenizer-free estimate |
-| `sweep.rulesMaxChars` | `3000` | Soft cap on per-language workspace-rules file size; overflow surfaces as a diagnostic + red background in the editor |
-| `sweep.injectInlineDiagnostics` | `false` | Inline `BUG:` comments next to diagnosed lines in the prompt — recommended for 0.5B / 1.5B sweep checkpoints |
-| `sweep.inlineDiagnosticsMarker` | `BUG: LSP error here` | Marker phrase used by the inline injection + response-side strip anchor |
-| `sweep.diagnosticsMessageTransforms` | clang preset | `{regex: replacement}` rewrites applied to every diagnostic message after the built-in normalisations |
+| `zeta.serverUrl` | `http://localhost:8080` | `/v1/completions` base URL |
+| `zeta.modelName` | `sweepai/zeta-next-edit` | `model` field in the request body; substring-matched to pick the prompt format |
+| `zeta.completionTimeoutMs` | `10000` | Per-request timeout (ms) |
+| `zeta.retriggerOnContextExit` | `false` | Opt in to requesting a completion after the cursor moves at least half the last model editable window, even with no text edit |
+| `zeta.contextExitRetriggerDebounceMs` | `1500` | Debounce for context-exit cursor retriggers, allowing navigation to settle; `0` uses the next event-loop turn |
+| `zeta.maxContextFiles` | `5` | Related excerpt cap; Zeta prioritizes LSP retrieval, then visible/recent buffers |
+| `zeta.outlineSymbols` | `0` | Optional nearby LSP symbols plus the active symbol path for every model. Includes methods, fields, enum members, and globals when provided; asynchronous and separate from `maxContextFiles`, a positive value opts in |
+| `zeta.maxRecentChangesChars` | `12000` | Character budget for formatted recent-edit history; `0` disables history |
+| `zeta.includeClipboardContext` | `true` | Include clipboard text as retrieval context; it is emitted last in retrieval |
+| `zeta.stableRetrievalOrdering` | `false` | Sort retrieval chunks deterministically to improve prefix-cache reuse |
+| `zeta.reuseIdenticalPromptResults` | `false` | Reuse recent temperature-0 results for byte-identical prompts |
+| `zeta.identicalPromptCacheTtlMs` | `5000` | TTL for identical-prompt result reuse |
+| `zeta.diagRadius` | `12` | ±N lines around cursor; `0` disables |
+| `zeta.editableTokens` | `2000` | Shared approximate active-file budget, estimated as UTF-8 bytes / 3 and snapped to whole lines. Sweep allocates 2/3 before and 1/3 after the cursor; Zeta uses it for its editable excerpt. |
+| `zeta.zetaContextTokens` | `150` | Approximate additional Zeta-2.1 current-file context budget, using the same tokenizer-free estimate |
+| `zeta.rulesMaxChars` | `3000` | Soft cap on per-language workspace-rules file size; overflow surfaces as a diagnostic + red background in the editor |
+| `zeta.injectInlineDiagnostics` | `false` | Inline `BUG:` comments next to diagnosed lines in the prompt — recommended for 0.5B / 1.5B sweep checkpoints |
+| `zeta.inlineDiagnosticsMarker` | `BUG: LSP error here` | Marker phrase used by the inline injection + response-side strip anchor |
+| `zeta.diagnosticsMessageTransforms` | clang preset | `{regex: replacement}` rewrites applied to every diagnostic message after the built-in normalisations |
 
 Zeta always uses the suffix-first FIM layout and chronological context order
 from its Zed training template. This prioritises edit quality over llama.cpp
@@ -72,10 +72,10 @@ Run any supported edit-prediction GGUF behind an OpenAI-compatible
 
 ```sh
 # Sweep Next Edit V2 7B
-llama-server -hf henrik3/sweep-next-edit-v2-7B-GGUF --ctx-size 32768
+llama-server -hf henrik3/zeta-next-edit-v2-7B-GGUF --ctx-size 32768
 
-# Sweep 1.5B (smaller, faster — turn on sweep.injectInlineDiagnostics)
-llama-server -hf sweepai/sweep-next-edit-1.5B --ctx-size 32768
+# Sweep 1.5B (smaller, faster — turn on zeta.injectInlineDiagnostics)
+llama-server -hf sweepai/zeta-next-edit-1.5B --ctx-size 32768
 
 # Zeta-2 (Zed's SeedCoder-8B, single-region)
 llama-server -hf bartowski/zed-industries_zeta-2-GGUF --ctx-size 16384
@@ -84,7 +84,7 @@ llama-server -hf bartowski/zed-industries_zeta-2-GGUF --ctx-size 16384
 llama-server -hf mradermacher/zeta-2.1-GGUF --ctx-size 16384
 ```
 
-Then point `sweep.modelName` at the right name. Detection rules:
+Then point `zeta.modelName` at the right name. Detection rules:
 
 - `zeta-2.1` / `zeta2.1` / `zeta-2-1` / `zeta_2_1` → Zeta-2.1 multi-region
 - `zeta2` / `zeta-2` / `seedcoder` → Zeta-2 single-region
@@ -93,7 +93,7 @@ Then point `sweep.modelName` at the right name. Detection rules:
 Sweep's GGUF advertises 32k natively; the full prompt routinely runs
 15–20k tokens for non-trivial files, so a smaller `--ctx-size`
 truncates real prompts. Zeta-2.1 follows the provider profile of roughly
-350 editable and 150 surrounding-context tokens. NESweep estimates those
+350 editable and 150 surrounding-context tokens. Zeta estimates those
 budgets as one token per three UTF-8 bytes and expands to whole lines around
 the cursor, avoiding a real tokenizer in the extension-host hot path.
 
@@ -103,7 +103,7 @@ Build & install the extension:
 bun install
 bun run build
 bunx @vscode/vsce package --no-dependencies --skip-license
-code --install-extension nesweep-*.vsix --force
+code --install-extension zeta-edit-prediction-*.vsix --force
 ```
 
 ## Credits
@@ -126,7 +126,7 @@ TypeScript translation of
 [`zed-industries/zed/crates/zeta/src/sweep_ai.rs`](https://github.com/zed-industries/zed/blob/76167109db7b/crates/zeta/src/sweep_ai.rs)
 — the wire-protocol structs, the `ActionType` enum with its
 `SCREAMING_SNAKE_CASE` serde rename, the brotli `(quality=11,
-lgwin=22)` params, the hardcoded `https://autocomplete.sweep.dev/...`
+lgwin=22)` params, the hardcoded `https://autocomplete.zeta.dev/...`
 endpoint, even the `// TODO`-fenced `privacy_mode_enabled: false`
 were carried over verbatim. The Rust file was removed from Zed in
 commit

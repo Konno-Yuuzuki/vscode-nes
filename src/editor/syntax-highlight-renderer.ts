@@ -531,7 +531,7 @@ let svgCacheDir: string | null = null;
 
 function getSvgCacheDir(): string {
 	if (!svgCacheDir) {
-		svgCacheDir = path.join(os.tmpdir(), "nesweep-svg-cache");
+		svgCacheDir = path.join(os.tmpdir(), "zeta-svg-cache");
 		if (!fs.existsSync(svgCacheDir)) {
 			fs.mkdirSync(svgCacheDir, { recursive: true });
 		}

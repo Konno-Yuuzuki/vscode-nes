@@ -1,6 +1,6 @@
 import type { FileChunk } from "./schemas.ts";
 
-// NESweep log markers that indicate clipboard content is a trace/log dump
+// Zeta log markers that indicate clipboard content is a trace/log dump
 // that would pollute the model prompt rather than provide useful context.
 const NES_LOG_PATTERNS = [
 	"<|marker_",
@@ -19,7 +19,7 @@ const NES_LOG_PATTERNS = [
 ];
 
 /**
- * Check if clipboard content looks like a NESweep trace/log dump.
+ * Check if clipboard content looks like a Zeta trace/log dump.
  * Returns true when the text contains enough markers to be considered
  * a log — the model seeing its own prompt scaffolding produces garbage.
  */

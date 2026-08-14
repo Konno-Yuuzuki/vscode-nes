@@ -384,7 +384,7 @@ describe("InlineEditProvider recent context", () => {
 		const logDocument = {
 			uri: {
 				scheme: "output",
-				toString: () => "output:SR-team.nezeta.NESweep.log",
+				toString: () => "output:SR-team.nezeta.Zeta.log",
 			},
 		} as vscode.TextDocument;
 		setVisibleTextEditors([{ document: logDocument } as vscode.TextEditor]);

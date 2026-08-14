@@ -1,11 +1,11 @@
-// Routes NESweep diagnostics through a vscode.LogOutputChannel.
+// Routes Zeta diagnostics through a vscode.LogOutputChannel.
 //
 // The channel:
-//   - shows up in the Output panel as "NESweep"
+//   - shows up in the Output panel as "Zeta"
 //   - is written to disk by VS Code at
-//       <userData>/logs/<session>/window<N>/exthost/sr-tream.nesweep/NESweep.log
+//       <userData>/logs/<session>/window<N>/exthost/sr-tream.zeta/Zeta.log
 //   - honours per-channel log level (Command Palette →
-//       "Developer: Set Log Level..." → NESweep) which gates trace/debug/info.
+//       "Developer: Set Log Level..." → Zeta) which gates trace/debug/info.
 //
 // Levels we use:
 //   error  — exceptions and failed I/O
@@ -20,7 +20,7 @@ let channel: vscode.LogOutputChannel | undefined;
 
 export function initLogger(): vscode.LogOutputChannel {
 	if (!channel) {
-		channel = vscode.window.createOutputChannel("NESweep", { log: true });
+		channel = vscode.window.createOutputChannel("Zeta", { log: true });
 	}
 	return channel;
 }

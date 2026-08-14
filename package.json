@@ -2,22 +2,22 @@
 	"name": "zeta-edit-prediction",
 	"displayName": "Zeta - Edit Prediction",
 	"description": "Next Edit Autocomplete using Zeta Model",
-	"version": "1.2.8-build.7",
-	"publisher": "SR-team",
+	"version": "1.2.8-build.8",
+	"publisher": "Yuuzuki",
 	"author": {
-		"name": "SR_team"
+		"name": "Yuuzuki"
 	},
 	"contributors": [
 		{
-			"name": "SweepAI"
+			"name": "Yuuzuki"
 		},
 		{
-			"name": "SR_team"
+			"name": "Yuuzuki"
 		}
 	],
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/sr-tream/vscode-nes"
+		"url": "https://github.com/Konno-Yuuzuki/vscode-nes"
 	},
 	"icon": "assets/nesweep.png",
 	"license": "AGPL-3.0-or-later",
@@ -39,35 +39,35 @@
 	"contributes": {
 		"icons": {
 			"nesweep-idle": {
-				"description": "NESweep idle icon",
+				"description": "Zeta idle icon",
 				"default": {
 					"fontPath": "assets/nesweep-icons.woff2",
 					"fontCharacter": "\\ea01"
 				}
 			},
 			"nesweep-load-1": {
-				"description": "NESweep loading frame 1 — |...",
+				"description": "Zeta loading frame 1 — |...",
 				"default": {
 					"fontPath": "assets/nesweep-icons.woff2",
 					"fontCharacter": "\\ea02"
 				}
 			},
 			"nesweep-load-2": {
-				"description": "NESweep loading frame 2 — .|..",
+				"description": "Zeta loading frame 2 — .|..",
 				"default": {
 					"fontPath": "assets/nesweep-icons.woff2",
 					"fontCharacter": "\\ea03"
 				}
 			},
 			"nesweep-load-3": {
-				"description": "NESweep loading frame 3 — ..|.",
+				"description": "Zeta loading frame 3 — ..|.",
 				"default": {
 					"fontPath": "assets/nesweep-icons.woff2",
 					"fontCharacter": "\\ea04"
 				}
 			},
 			"nesweep-load-4": {
-				"description": "NESweep loading frame 4 — ...|",
+				"description": "Zeta loading frame 4 — ...|",
 				"default": {
 					"fontPath": "assets/nesweep-icons.woff2",
 					"fontCharacter": "\\ea05"
@@ -77,66 +77,66 @@
 		"commands": [
 			{
 				"command": "zeta.triggerNextEdit",
-				"title": "NESweep: Trigger Next Edit Suggestion"
+				"title": "Zeta: Trigger Next Edit Suggestion"
 			},
 			{
 				"command": "zeta.toggleEnabled",
-				"title": "NESweep: Toggle Enabled"
+				"title": "Zeta: Toggle Enabled"
 			},
 			{
 				"command": "zeta.showMenu",
-				"title": "NESweep: Show Menu"
+				"title": "Zeta: Show Menu"
 			},
 			{
 				"command": "zeta.acceptJumpEdit",
-				"title": "NESweep: Accept Jump Edit"
+				"title": "Zeta: Accept Jump Edit"
 			},
 			{
 				"command": "zeta.acceptJumpEditLine",
-				"title": "NESweep: Accept Jump Edit Line"
+				"title": "Zeta: Accept Jump Edit Line"
 			},
 			{
 				"command": "zeta.acceptInlineEdit",
-				"title": "NESweep: Accept Inline Edit"
+				"title": "Zeta: Accept Inline Edit"
 			},
 			{
 				"command": "zeta.dismissJumpEdit",
-				"title": "NESweep: Dismiss Jump Edit"
+				"title": "Zeta: Dismiss Jump Edit"
 			},
 			{
 				"command": "zeta.enableProposedApi",
-				"title": "NESweep: Enable Proposed APIs"
+				"title": "Zeta: Enable Proposed APIs"
 			},
 			{
 				"command": "zeta.showErrorLog",
-				"title": "NESweep: Show Error Log"
+				"title": "Zeta: Show Error Log"
 			}
 		],
 		"keybindings": [
 			{
 				"command": "zeta.acceptJumpEdit",
 				"key": "tab",
-				"when": "editorTextFocus && sweep.hasJumpEdit && !editorHasSelection"
+				"when": "editorTextFocus && zeta.hasJumpEdit && !editorHasSelection"
 			},
 			{
 				"command": "zeta.acceptJumpEditLine",
 				"key": "ctrl+enter",
-				"when": "editorTextFocus && sweep.hasJumpEdit && !editorHasSelection"
+				"when": "editorTextFocus && zeta.hasJumpEdit && !editorHasSelection"
 			},
 			{
 				"command": "zeta.acceptJumpEdit",
 				"key": "alt+l",
-				"when": "isLinux && editorTextFocus && sweep.hasJumpEdit && !editorHasSelection"
+				"when": "isLinux && editorTextFocus && zeta.hasJumpEdit && !editorHasSelection"
 			},
 			{
 				"command": "zeta.dismissJumpEdit",
 				"key": "escape",
-				"when": "editorTextFocus && sweep.hasJumpEdit"
+				"when": "editorTextFocus && zeta.hasJumpEdit"
 			},
 			{
 				"command": "editor.action.inlineSuggest.hide",
 				"key": "escape",
-				"when": "editorTextFocus && inlineSuggestionVisible && !sweep.hasJumpEdit"
+				"when": "editorTextFocus && inlineSuggestionVisible && !zeta.hasJumpEdit"
 			}
 		],
 		"configurationDefaults": {
@@ -144,7 +144,7 @@
 		},
 		"configuration": [
 			{
-				"title": "NESweep: General & Sweep Context",
+				"title": "Zeta: General & Sweep Context",
 				"order": 10,
 				"properties": {
 					"zeta.enabled": {
@@ -320,7 +320,7 @@
 				}
 			},
 			{
-				"title": "NESweep: Active File Context",
+				"title": "Zeta: Active File Context",
 				"order": 20,
 				"properties": {
 					"zeta.editableTokens": {

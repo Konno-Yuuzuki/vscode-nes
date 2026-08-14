@@ -28,7 +28,7 @@ let statusBar: SweepStatusBar;
 let completionServer: CompletionServer;
 let copilotStylePresentationWarningShown = false;
 
-const COPILOT_STYLE_PROPOSED_API_EXTENSION_ID = "sr-team.nesweep";
+const COPILOT_STYLE_PROPOSED_API_EXTENSION_ID = "sr-team.zeta";
 
 function maybeWarnAboutCopilotStylePresentation(): void {
 	if (
@@ -47,7 +47,7 @@ function maybeWarnAboutCopilotStylePresentation(): void {
 	// product.json updated → restart prompt.
 	void vscode.window
 		.showWarningMessage(
-			"NESweep uses the proposed inlineCompletionsAdditions API to display Copilot-style inline edits. " +
+			"Zeta uses the proposed inlineCompletionsAdditions API to display Copilot-style inline edits. " +
 				"Enabling it modifies product.json in the current VS Code installation and requires administrator permission. " +
 				"Without it, Tab-accepted jump edits still work, but the inline edit presentation is not displayed.",
 			{ modal: true },
@@ -141,7 +141,7 @@ export function findProductJson(): string | null {
 async function enableProposedApi(): Promise<void> {
 	if (isProposedApiEnabled()) {
 		void vscode.window.showInformationMessage(
-			"NESweep proposed API is already enabled.",
+			"Zeta proposed API is already enabled.",
 		);
 		return;
 	}
@@ -149,13 +149,13 @@ async function enableProposedApi(): Promise<void> {
 	const productPath = findProductJson();
 	if (!productPath) {
 		void vscode.window.showErrorMessage(
-			"Cannot find VS Code product.json. Use --enable-proposed-api=sr-team.nesweep to start VS Code.",
+			"Cannot find VS Code product.json. Use --enable-proposed-api=sr-team.zeta to start VS Code.",
 		);
 		return;
 	}
 
 	const selection = await vscode.window.showWarningMessage(
-		"Enable NESweep Copilot-style next-edit presentation?",
+		"Enable Zeta Copilot-style next-edit presentation?",
 		{
 			modal: true,
 			detail:
@@ -174,8 +174,8 @@ $d = $c | ConvertFrom-Json
 if (-not $d.extensionEnabledApiProposals) {
   $d | Add-Member -NotePropertyName "extensionEnabledApiProposals" -NotePropertyValue @{} -Force
 }
-if (-not $d.extensionEnabledApiProposals."sr-team.nesweep") {
-  $d.extensionEnabledApiProposals | Add-Member -NotePropertyName "sr-team.nesweep" -NotePropertyValue @("inlineCompletionsAdditions") -Force
+if (-not $d.extensionEnabledApiProposals."sr-team.zeta") {
+  $d.extensionEnabledApiProposals | Add-Member -NotePropertyName "sr-team.zeta" -NotePropertyValue @("inlineCompletionsAdditions") -Force
   $n = $d | ConvertTo-Json -Depth 10
   # Write UTF-8 without BOM
   [System.IO.File]::WriteAllText($p, $n, [System.Text.UTF8Encoding]::new($false))
@@ -199,7 +199,7 @@ if (-not $d.extensionEnabledApiProposals."sr-team.nesweep") {
 
 	if (isProposedApiEnabled()) {
 		void vscode.window.showInformationMessage(
-			"NESweep proposed API enabled. Please restart VS Code completely for the change to take effect.",
+			"Zeta proposed API enabled. Please restart VS Code completely for the change to take effect.",
 		);
 		// Show restart prompt
 		await vscode.window.showInformationMessage(
@@ -208,14 +208,14 @@ if (-not $d.extensionEnabledApiProposals."sr-team.nesweep") {
 		);
 	} else {
 		void vscode.window.showErrorMessage(
-			"Failed to enable proposed API. Use --enable-proposed-api=sr-team.nesweep to start VS Code.",
+			"Failed to enable proposed API. Use --enable-proposed-api=sr-team.zeta to start VS Code.",
 		);
 	}
 }
 
 export function activate(context: vscode.ExtensionContext) {
 	const logChannel = initLogger();
-	logger.info("NESweep activated");
+	logger.info("Zeta activated");
 	errorMonitor.init();
 	initSyntaxHighlighter();
 
@@ -233,7 +233,7 @@ export function activate(context: vscode.ExtensionContext) {
 		{ pattern: "**/*" },
 		provider,
 		{
-			displayName: "NESweep",
+			displayName: "Zeta",
 			groupId: "nes",
 			debounceDelayMs: 0,
 		},
@@ -430,14 +430,14 @@ class ErrorMonitor {
 		if (this.errors.length >= 5 && !this.warned) {
 			this.warned = true;
 			void vscode.window.showWarningMessage(
-				`NESweep has encountered ${this.errors.length} errors. Run "NESweep: Show Error Log" for details.`,
+				`Zeta has encountered ${this.errors.length} errors. Run "Zeta: Show Error Log" for details.`,
 			);
 		}
 	}
 
 	show(): void {
 		if (this.errors.length === 0) {
-			void vscode.window.showInformationMessage("No NESweep errors recorded.");
+			void vscode.window.showInformationMessage("No Zeta errors recorded.");
 			return;
 		}
 		const text = this.errors
@@ -446,7 +446,7 @@ class ErrorMonitor {
 			)
 			.join("\n");
 		void vscode.window.showInformationMessage(
-			`NESweep Error Log (${this.errors.length} entries):\n${text}`,
+			`Zeta Error Log (${this.errors.length} entries):\n${text}`,
 			{ modal: true },
 		);
 	}

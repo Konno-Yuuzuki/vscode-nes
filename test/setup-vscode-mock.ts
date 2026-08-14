@@ -25,7 +25,7 @@ const noopChannel = {
 	show: () => {},
 	hide: () => {},
 	dispose: () => {},
-	name: "NESweep",
+	name: "Zeta",
 	logLevel: 0,
 	onDidChangeLogLevel: () => ({ dispose: () => {} }),
 	replace: () => {},

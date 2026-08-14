@@ -388,7 +388,7 @@ export function buildZeta2Prompt(
 	// Workspace rules pseudo-file first inside the prefix block. Rules
 	// are session-stable (only change when the user edits
 	// .vscode/nes-{lang}.md) while every later pseudo-file is volatile,
-	// so this maximises prefix-cache reuse across requests. NESweep
+	// so this maximises prefix-cache reuse across requests. Zeta
 	// extension — cursortab's zeta2 has no equivalent slot.
 	if (opts.rules !== "") {
 		contextStats.rules = opts.rules.length;

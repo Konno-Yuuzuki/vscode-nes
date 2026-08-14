@@ -28,7 +28,7 @@ export const JUMP_RETRIGGER_DELAY_MS = 100;
 // of them dominates the prompt for files with a chatty linter.
 export const DEFAULT_DIAG_RADIUS = 12;
 // Shared current-file budget for Sweep's broad context and Zeta's editable
-// excerpt. NESweep deliberately avoids loading a tokenizer into the extension
+// excerpt. Zeta deliberately avoids loading a tokenizer into the extension
 // host: prompt builders estimate one token per three UTF-8 bytes and retain
 // whole lines around the cursor.
 export const DEFAULT_EDITABLE_TOKENS = 2_000;

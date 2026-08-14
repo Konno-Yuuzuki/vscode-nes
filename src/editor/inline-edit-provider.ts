@@ -299,6 +299,19 @@ function hideSuggestWidget(): void {
 	}
 }
 
+/** Awaitable version of hideSuggestWidget. Returns a promise that resolves
+ *  when the first successful close command completes. */
+async function hideSuggestWidgetAsync(): Promise<void> {
+	for (const cmd of SUGGEST_HIDE_COMMANDS) {
+		try {
+			await vscode.commands.executeCommand(cmd);
+			return;
+		} catch {
+			// Try next command
+		}
+	}
+}
+
 export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 	private tracker: DocumentTracker;
 	private jumpEditManager: JumpEditManager;
@@ -653,17 +666,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 				this.jumpEditManager.clearJumpEdit();
 				// Close the autocomplete suggest widget so the inline ghost text
 				// is not obscured by the completion popup.
-				const CLOSE_SUGGEST_COMMANDS = [
-					"editor.action.suggestWidget.hide",
-					"editor.action.closeSuggestWidget",
-					"closeSuggestWidget",
-				];
-				for (const cmd of CLOSE_SUGGEST_COMMANDS) {
-					try {
-						await vscode.commands.executeCommand(cmd);
-						break;
-					} catch {}
-				}
+				await hideSuggestWidgetAsync();
 				logger.info("Rendering Copilot-style inline edit sequence", {
 					count: copilotResults.length,
 					id: firstCopilotResult.result.id,

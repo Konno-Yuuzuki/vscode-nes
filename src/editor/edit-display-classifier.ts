@@ -62,6 +62,10 @@ export function classifyEditDisplay(
 		};
 	}
 
+	// Edit starts after the cursor but at a different line — VS Code's inline
+	// ghost text only renders at the cursor position, so a multi-line edit
+	// elsewhere won't be visible. Route to jump-edit decorat...[truncated]
+
 	if (
 		hasMultilineCompletion &&
 		input.startIndex === input.cursorOffset &&

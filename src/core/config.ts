@@ -35,7 +35,7 @@ export class SweepConfig {
 	}
 
 	get streamEnabled(): boolean {
-		return this.config.get<boolean>("streamEnabled", true);
+		return this.config.get<boolean>("streamEnabled", false);
 	}
 
 	/**
@@ -109,14 +109,6 @@ export class SweepConfig {
 			"useCopilotStyleNextEditPresentation",
 			false,
 		);
-	}
-
-	/**
-	 * Stream completions over SSE when the server supports it. Falls back to
-	 * a single-shot request when the server rejects the stream flag.
-	 */
-	get streamEnabled(): boolean {
-		return this.config.get<boolean>("streamEnabled", true);
 	}
 
 	get serverUrl(): string {

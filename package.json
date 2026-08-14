@@ -2,7 +2,7 @@
 	"name": "nesweep",
 	"displayName": "NESweep autocompletion",
 	"description": "Next Edit Autocomplete using Sweep Model",
-	"version": "1.2.8-build.2",
+	"version": "1.2.8-build.5",
 	"publisher": "SR-team",
 	"author": {
 		"name": "SR_team"
@@ -153,6 +153,13 @@
 						"order": 10,
 						"scope": "window",
 						"markdownDescription": "Enable or disable NESweep suggestions for this window."
+					},
+					"sweep.streamEnabled": {
+						"type": "boolean",
+						"default": false,
+						"order": 15,
+						"scope": "window",
+						"markdownDescription": "Stream completions over SSE (Server-Sent Events). When enabled, tokens arrive incrementally but the ghost text is still rendered after the full response is received. Disable for cleaner log output with complete `prompt_eval`/`eval` statistics."
 					},
 					"sweep.maxContextFiles": {
 						"type": "number",

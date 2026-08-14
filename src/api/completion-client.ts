@@ -17,17 +17,6 @@ export interface CompletionResult {
 	evalCount?: number;
 }
 
-interface OpenAICompletionResponse {
-	choices?: Array<{
-		text?: string;
-		finish_reason?: string;
-	}>;
-	usage?: {
-		prompt_tokens?: number;
-		completion_tokens?: number;
-	};
-}
-
 export class CompletionClient {
 	constructor(private readonly baseUrl: string) {}
 
@@ -47,16 +36,13 @@ export class CompletionClient {
 		return this.sendRequest(body, req.timeoutMs, signal);
 	}
 
-	/**
-	 * Stream a completion via SSE. Calls `onToken(result)` with each partial
-	 * result (accumulated text), then resolves the promise with the final result.
-	 */
 	async completeStream(
 		req: CompletionRequest,
 		signal: AbortSignal | undefined,
 		onToken: (partial: CompletionResult) => void,
 	): Promise<CompletionResult> {
 		const body = {
+			inference_model: req.model,
 			model: req.model,
 			prompt: req.prompt,
 			temperature: req.temperature,
@@ -77,7 +63,8 @@ export class CompletionClient {
 		const payload = JSON.stringify(body);
 		const url = new URL("/v1/completions", this.baseUrl);
 		const transport = url.protocol === "https:" ? https : http;
-		const port = url.port || (url.protocol === "https:" ? 443 : 80);
+		const port =
+			parseInt(url.port, 10) || (url.protocol === "https:" ? 443 : 80);
 
 		const result: CompletionResult = {
 			text: "",
@@ -87,52 +74,13 @@ export class CompletionClient {
 		return new Promise((resolve, reject) => {
 			let settled = false;
 			let responseEnded = false;
-			let idleTimer: ReturnType<typeof setTimeout> | undefined;
-			let totalTimer: ReturnType<typeof setTimeout> | undefined;
-			let streamStarted = false;
+			let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
 			const finish = (fn: () => void) => {
 				if (settled) return;
 				settled = true;
-				cleanup();
+				if (deadlineTimer) clearTimeout(deadlineTimer);
+				if (signal) signal.removeEventListener("abort", onAbort);
 				fn();
-			};
-
-			// In streaming mode the timeout is an IDLE timeout: it resets on
-			// every received chunk, so a slow-but-progressing generation is not
-			// killed. A separate total cap (timeoutMs * 6) guards against the
-			// server sending nothing at all. Non-streaming keeps a hard total
-			// timeout.
-			const isStreaming = body.stream === true;
-			const totalBudgetMs = isStreaming ? timeoutMs * 6 : timeoutMs;
-
-			const armIdleTimer = () => {
-				if (!isStreaming) return;
-				if (idleTimer) clearTimeout(idleTimer);
-				idleTimer = setTimeout(() => {
-					httpReq.destroy();
-					finish(() =>
-						reject(
-							new Error(
-								`Completion stream stalled: no data for ${timeoutMs}ms`,
-							),
-						),
-					);
-				}, timeoutMs);
-			};
-
-			const armTotalTimer = () => {
-				totalTimer = setTimeout(() => {
-					const err = new Error(
-						`Completion request timed out after ${totalBudgetMs}ms` +
-							(isStreaming
-								? ` (stream${streamStarted ? ", receiving" : " waiting for first chunk"})`
-								: ""),
-					);
-					finish(() => {
-						httpReq.destroy();
-						reject(err);
-					});
-				}, totalBudgetMs);
 			};
 
 			const reqOptions: http.RequestOptions = {
@@ -144,7 +92,6 @@ export class CompletionClient {
 					"Content-Type": "application/json",
 					"Content-Length": Buffer.byteLength(payload),
 				},
-				timeout: timeoutMs,
 			};
 
 			const httpReq = transport.request(reqOptions, (res) => {
@@ -160,10 +107,18 @@ export class CompletionClient {
 					onToken({ ...result });
 				};
 
-				/** Parse a single SSE `data: {...}` JSON line and update `result`. */
 				const parseSseJson = (jsonStr: string) => {
 					try {
-						const parsed = JSON.parse(jsonStr) as OpenAICompletionResponse;
+						const parsed = JSON.parse(jsonStr) as {
+							choices?: Array<{
+								text?: string;
+								finish_reason?: string;
+							}>;
+							usage?: {
+								prompt_tokens?: number;
+								completion_tokens?: number;
+							};
+						};
 						const choice = parsed.choices?.[0];
 						if (choice?.text) {
 							result.text += choice.text;
@@ -172,8 +127,6 @@ export class CompletionClient {
 						if (choice?.finish_reason) {
 							result.finishReason = choice.finish_reason;
 						}
-						// Usage may arrive in the last SSE message (before [DONE])
-						// even when choices[0].text is absent.
 						if (parsed.usage?.prompt_tokens !== undefined) {
 							result.promptEvalCount = parsed.usage.prompt_tokens;
 						}
@@ -181,15 +134,13 @@ export class CompletionClient {
 							result.evalCount = parsed.usage.completion_tokens;
 						}
 					} catch {
-						// Incomplete JSON line — keep accumulating
+						// Incomplete JSON — keep accumulating
 					}
 				};
 
 				const onResponseData = (chunk: Buffer | string) => {
 					const chunkStr = chunk.toString();
 					if (isStreaming) {
-						streamStarted = true;
-						armIdleTimer();
 						data += chunkStr;
 						const lines = data.split("\n");
 						data = lines.pop() ?? "";
@@ -221,7 +172,6 @@ export class CompletionClient {
 					if (!isStreaming) {
 						parseSseJson(data);
 					}
-					// Final emit: send the complete result
 					if (onToken) onToken({ ...result });
 					finish(() => resolve(result));
 				};
@@ -260,6 +210,15 @@ export class CompletionClient {
 				res.on("close", onResponseClose);
 			});
 
+			const onTimeout = () => {
+				finish(() => {
+					httpReq.destroy();
+					reject(
+						new Error(`Completion request timed out after ${timeoutMs}ms`),
+					);
+				});
+			};
+
 			const onError = (error: Error) => {
 				finish(() =>
 					reject(new Error(`Completion request error: ${error.message}`)),
@@ -275,31 +234,9 @@ export class CompletionClient {
 				});
 			};
 
-			const cleanup = () => {
-				if (idleTimer) {
-					clearTimeout(idleTimer);
-					idleTimer = undefined;
-				}
-				if (totalTimer) {
-					clearTimeout(totalTimer);
-					totalTimer = undefined;
-				}
-				httpReq.off("timeout", onError);
-				if (signal) signal.removeEventListener("abort", onAbort);
-			};
-
 			httpReq.on("error", onError);
-			// http "timeout" (socket inactivity) is handled by idleTimer in
-			// streaming mode; non-streaming requests keep it as a socket-level
-			// guard alongside the total timer.
-			if (!isStreaming) httpReq.on("timeout", () => httpReq.destroy());
-
-			if (isStreaming) {
-				armIdleTimer();
-				armTotalTimer();
-			} else {
-				armTotalTimer();
-			}
+			httpReq.on("timeout", onTimeout);
+			deadlineTimer = setTimeout(onTimeout, timeoutMs);
 			if (signal) {
 				if (signal.aborted) {
 					onAbort();
@@ -317,7 +254,8 @@ export class CompletionClient {
 		return new Promise((resolve) => {
 			const url = new URL("/health", this.baseUrl);
 			const transport = url.protocol === "https:" ? https : http;
-			const port = url.port || (url.protocol === "https:" ? 443 : 80);
+			const port =
+				parseInt(url.port, 10) || (url.protocol === "https:" ? 443 : 80);
 			const req = transport.get(
 				{
 					hostname: url.hostname,

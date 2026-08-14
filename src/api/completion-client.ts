@@ -87,12 +87,52 @@ export class CompletionClient {
 		return new Promise((resolve, reject) => {
 			let settled = false;
 			let responseEnded = false;
-			let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+			let idleTimer: ReturnType<typeof setTimeout> | undefined;
+			let totalTimer: ReturnType<typeof setTimeout> | undefined;
+			let streamStarted = false;
 			const finish = (fn: () => void) => {
 				if (settled) return;
 				settled = true;
 				cleanup();
 				fn();
+			};
+
+			// In streaming mode the timeout is an IDLE timeout: it resets on
+			// every received chunk, so a slow-but-progressing generation is not
+			// killed. A separate total cap (timeoutMs * 6) guards against the
+			// server sending nothing at all. Non-streaming keeps a hard total
+			// timeout.
+			const isStreaming = body.stream === true;
+			const totalBudgetMs = isStreaming ? timeoutMs * 6 : timeoutMs;
+
+			const armIdleTimer = () => {
+				if (!isStreaming) return;
+				if (idleTimer) clearTimeout(idleTimer);
+				idleTimer = setTimeout(() => {
+					httpReq.destroy();
+					finish(() =>
+						reject(
+							new Error(
+								`Completion stream stalled: no data for ${timeoutMs}ms`,
+							),
+						),
+					);
+				}, timeoutMs);
+			};
+
+			const armTotalTimer = () => {
+				totalTimer = setTimeout(() => {
+					const err = new Error(
+						`Completion request timed out after ${totalBudgetMs}ms` +
+							(isStreaming
+								? ` (stream${streamStarted ? ", receiving" : " waiting for first chunk"})`
+								: ""),
+					);
+					finish(() => {
+						httpReq.destroy();
+						reject(err);
+					});
+				}, totalBudgetMs);
 			};
 
 			const reqOptions: http.RequestOptions = {
@@ -148,6 +188,8 @@ export class CompletionClient {
 				const onResponseData = (chunk: Buffer | string) => {
 					const chunkStr = chunk.toString();
 					if (isStreaming) {
+						streamStarted = true;
+						armIdleTimer();
 						data += chunkStr;
 						const lines = data.split("\n");
 						data = lines.pop() ?? "";
@@ -224,16 +266,6 @@ export class CompletionClient {
 				);
 			};
 
-			const onTimeout = () => {
-				const err = new Error(
-					`Completion request timed out after ${timeoutMs}ms`,
-				);
-				finish(() => {
-					httpReq.destroy();
-					reject(err);
-				});
-			};
-
 			const onAbort = () => {
 				const abortError = new Error("Request aborted");
 				abortError.name = "AbortError";
@@ -244,17 +276,30 @@ export class CompletionClient {
 			};
 
 			const cleanup = () => {
-				if (deadlineTimer) {
-					clearTimeout(deadlineTimer);
-					deadlineTimer = undefined;
+				if (idleTimer) {
+					clearTimeout(idleTimer);
+					idleTimer = undefined;
 				}
-				httpReq.off("timeout", onTimeout);
+				if (totalTimer) {
+					clearTimeout(totalTimer);
+					totalTimer = undefined;
+				}
+				httpReq.off("timeout", onError);
 				if (signal) signal.removeEventListener("abort", onAbort);
 			};
 
 			httpReq.on("error", onError);
-			httpReq.on("timeout", onTimeout);
-			deadlineTimer = setTimeout(onTimeout, timeoutMs);
+			// http "timeout" (socket inactivity) is handled by idleTimer in
+			// streaming mode; non-streaming requests keep it as a socket-level
+			// guard alongside the total timer.
+			if (!isStreaming) httpReq.on("timeout", () => httpReq.destroy());
+
+			if (isStreaming) {
+				armIdleTimer();
+				armTotalTimer();
+			} else {
+				armTotalTimer();
+			}
 			if (signal) {
 				if (signal.aborted) {
 					onAbort();

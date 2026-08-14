@@ -2,7 +2,7 @@
 	"name": "zeta-edit-prediction",
 	"displayName": "Zeta - Edit Prediction",
 	"description": "Next Edit Autocomplete using Zeta Model",
-	"version": "1.2.8-build.10",
+	"version": "1.2.8-build.11",
 	"publisher": "Yuuzuki",
 	"author": {
 		"name": "Yuuzuki"

@@ -358,7 +358,6 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		token: vscode.CancellationToken,
 	): vscode.InlineCompletionList | undefined {
 		const requestId = ++this.requestCounter;
-		this.latestRequestId = requestId;
 
 		if (!config.enabled) return undefined;
 		if (config.isAutocompleteSnoozed()) return undefined;
@@ -424,6 +423,12 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 			}
 			return undefined;
 		}
+
+		// Only update latestRequestId AFTER passing all early-return checks.
+		// This prevents cursor-movement-only invocations (which fail the
+		// content-change check above) from invalidating the debounce of an
+		// in-flight request.
+		this.latestRequestId = requestId;
 
 		// Only log 'provider invoked' after passing the content‑change check.
 		// This avoids log noise when VS Code calls the provider repeatedly

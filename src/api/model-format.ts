@@ -1,5 +1,5 @@
 // Selects which prompt-format dialect we speak based on the configured
-// model name. Each backend (sweep next-edit, Zed's Zeta2/2.1 SeedCoder)
+// model name. Each backend (zeta edit-prediction, Zed's Zeta2/2.1 SeedCoder)
 // has its own prompt layout and stop tokens, but they share the same
 // response shape (replace a slice of the buffer with new lines), so
 // dispatch happens at prompt-builder + response-parser level only.
@@ -17,7 +17,7 @@ export interface PromptLine {
 }
 
 // One editable region inside the prompt. Zeta2.1 subdivides its single
-// contiguous region with markerBoundaryLines; sweep / zeta2.0 use one region
+// contiguous region with markerBoundaryLines; zeta2.0 use one region
 // without numbered boundaries.
 export interface EditRegion {
 	// 0-indexed half-open line range in the document.

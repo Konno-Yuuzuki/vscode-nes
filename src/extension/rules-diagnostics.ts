@@ -1,6 +1,6 @@
 // Soft-cap warning for .vscode/nes-<languageId>.md rules files. The
 // rules body is wrapped as comments and spliced into the prefix of
-// every completion prompt (see api/rules.ts + sweep-prompt.ts). A
+// every completion prompt (see api/rules.ts + prompt-utils.ts). A
 // caching-enabled server (llama.cpp with -cpent, vLLM/sglang prefix
 // cache) reuses the rules KV across requests, so the steady-state cost
 // is mostly the context budget consumed — the per-request prompt-eval

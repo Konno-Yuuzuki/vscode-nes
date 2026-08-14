@@ -26,7 +26,7 @@ describe("proposed inline edit presentation", () => {
 				label: "Edit at line 11",
 				kind: INLINE_COMPLETION_DISPLAY_LOCATION_KIND.Label,
 			},
-			correlationId: "nesweep-test",
+			correlationId: "zeta-test",
 		});
 
 		expect(proposed.isInlineEdit).toBe(true);
@@ -37,7 +37,7 @@ describe("proposed inline edit presentation", () => {
 		expect(proposed.displayLocation?.kind).toBe(
 			INLINE_COMPLETION_DISPLAY_LOCATION_KIND.Label,
 		);
-		expect(proposed.correlationId).toBe("nesweep-test");
+		expect(proposed.correlationId).toBe("zeta-test");
 	});
 
 	test("enables forward stability on returned inline completion lists", () => {

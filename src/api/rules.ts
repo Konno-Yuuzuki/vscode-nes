@@ -6,7 +6,7 @@
 // javascript, typescript, python, …). The body is wrapped in the
 // language's single-line comment syntax and emitted as a sibling
 // section <|file_sep|>context/rules\n... right before the
-// original/current/updated triplet (see sweep-prompt.ts).
+// original/current/updated triplet (see prompt-utils.ts).
 
 import * as fs from "node:fs";
 import * as path from "node:path";

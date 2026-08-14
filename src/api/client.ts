@@ -608,7 +608,7 @@ export class ApiClient {
 
 		const filePath = toUnixPath(document.uri.fsPath) || "untitled";
 		const isZeta = format === "zeta2" || format === "zeta2.1";
-		const sweepRecentChanges = isZeta
+		const localRecentChanges = isZeta
 			? recentChanges
 			: excludeSweepBroadWindowChanges(
 					recentChanges,
@@ -621,7 +621,7 @@ export class ApiClient {
 					config.editableTokens,
 				);
 		const recentChangesText = formatRecentChanges(
-			sweepRecentChanges,
+			recentChanges,
 			config.maxRecentChangesChars,
 			isZeta
 				? {

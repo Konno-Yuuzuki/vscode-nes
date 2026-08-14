@@ -1006,7 +1006,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		const format = detectModelFormat(config.modelName);
 		let startLine: number;
 		let endLine: number;
-		if (format === "sweep") {
+		if (format === "zeta2" || format === "zeta2.1") {
 			const window = selectZetaCursorWindowFromLineProvider(
 				document.lineCount,
 				snapshot.position.line,

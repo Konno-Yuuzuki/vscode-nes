@@ -28,7 +28,7 @@ let statusBar: SweepStatusBar;
 let completionServer: CompletionServer;
 let copilotStylePresentationWarningShown = false;
 
-const COPILOT_STYLE_PROPOSED_API_EXTENSION_ID = "sr-team.zeta";
+const COPILOT_STYLE_PROPOSED_API_EXTENSION_ID = "Yuuzuki.zeta-edit-prediction";
 
 function maybeWarnAboutCopilotStylePresentation(): void {
 	if (
@@ -149,7 +149,7 @@ async function enableProposedApi(): Promise<void> {
 	const productPath = findProductJson();
 	if (!productPath) {
 		void vscode.window.showErrorMessage(
-			"Cannot find VS Code product.json. Use --enable-proposed-api=sr-team.zeta to start VS Code.",
+			"Cannot find VS Code product.json. Use --enable-proposed-api=Yuuzuki.zeta-edit-prediction to start VS Code.",
 		);
 		return;
 	}
@@ -174,8 +174,8 @@ $d = $c | ConvertFrom-Json
 if (-not $d.extensionEnabledApiProposals) {
   $d | Add-Member -NotePropertyName "extensionEnabledApiProposals" -NotePropertyValue @{} -Force
 }
-if (-not $d.extensionEnabledApiProposals."sr-team.zeta") {
-  $d.extensionEnabledApiProposals | Add-Member -NotePropertyName "sr-team.zeta" -NotePropertyValue @("inlineCompletionsAdditions") -Force
+if (-not $d.extensionEnabledApiProposals."Yuuzuki.zeta-edit-prediction") {
+  $d.extensionEnabledApiProposals | Add-Member -NotePropertyName "Yuuzuki.zeta-edit-prediction" -NotePropertyValue @("inlineCompletionsAdditions") -Force
   $n = $d | ConvertTo-Json -Depth 10
   # Write UTF-8 without BOM
   [System.IO.File]::WriteAllText($p, $n, [System.Text.UTF8Encoding]::new($false))
@@ -208,7 +208,7 @@ if (-not $d.extensionEnabledApiProposals."sr-team.zeta") {
 		);
 	} else {
 		void vscode.window.showErrorMessage(
-			"Failed to enable proposed API. Use --enable-proposed-api=sr-team.zeta to start VS Code.",
+			"Failed to enable proposed API. Use --enable-proposed-api=Yuuzuki.zeta-edit-prediction to start VS Code.",
 		);
 	}
 }

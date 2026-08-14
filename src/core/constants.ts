@@ -40,8 +40,8 @@ export const ESTIMATED_BYTES_PER_TOKEN = 3;
 export const ZETA_TRAINING_TEMPLATE_MAX_EDIT_EVENTS = 6;
 
 // Model parameters
-export const MODEL_NAME = "sweepai/sweep-next-edit";
-// Stay generous: the sweep model rewrites the whole edit window even when
+export const MODEL_NAME = "zeta-edit-prediction";
+// Stay generous: the zeta model rewrites the whole edit window even when
 // only one line changed, so a too-low cap truncates mid-window. Without
 // cursortab's anchor-based truncation handling, a truncated response yields
 // a corrupt line-diff (window tail no longer matches), so we just reject

@@ -761,7 +761,7 @@ function decorateLinesWithFixmes(
 		return { promptLines: lines, injectedFixmeMessages: [] };
 	}
 	const cursorLine1 = cursorLine + 1;
-	// See sweep-prompt.ts decorateLinesWithFixmes for the format / strip
+	// See prompt-utils.ts decorateLinesWithFixmes for the format / strip
 	// anchor rationale.
 	type Entry = { message: string; code: string | undefined };
 	const byLine = new Map<number, Entry[]>();

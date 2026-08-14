@@ -214,7 +214,7 @@ function buildRegionResponse(
 	// Replace the FIRST cursor marker with a sentinel so we can track
 	// the post-edit cursor position through the line-diff and surface
 	// it as a snippet $0 placeholder. Accept both <|user_cursor|>
-	// (Zeta2's trained marker) and <|cursor|> (sweep-style — some
+	// (Zeta2's trained marker) and <|cursor|> (zeta-style — some
 	// SeedCoder checkpoints echo it back). Only the primary region is
 	// expected to contain a cursor marker, but secondary regions are
 	// safe to run through this — countCursorMarkers will return 0.

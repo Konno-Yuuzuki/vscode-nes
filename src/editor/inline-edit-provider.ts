@@ -358,9 +358,6 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 			logger.debug("Suppressing inline edit:", suppressionReason);
 			return undefined;
 		}
-		logger.debug(
-			`provider invoked req=${requestId} line=${position.line} char=${position.character}`,
-		);
 
 		const uri = document.uri.toString();
 		const filePath = document.uri.fsPath;
@@ -407,6 +404,14 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 			}
 			return undefined;
 		}
+
+		// Only log 'provider invoked' after passing the content‑change check.
+		// This avoids log noise when VS Code calls the provider repeatedly
+		// due to suggest‑widget activity (ini, .env, conf files) without any
+		// actual document change.
+		logger.debug(
+			`provider invoked req=${requestId} line=${position.line} char=${position.character}`,
+		);
 		if (this.shouldConsumeQueuedSuggestion) {
 			const queuedItems = this.consumeQueuedSuggestion(document, position);
 			if (queuedItems) {

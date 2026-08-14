@@ -2,7 +2,7 @@
 	"name": "zeta-edit-prediction",
 	"displayName": "Zeta - Edit Prediction",
 	"description": "Next Edit Autocomplete using Zeta Model",
-	"version": "1.2.8-build.8",
+	"version": "1.2.8-build.9",
 	"publisher": "Yuuzuki",
 	"author": {
 		"name": "Yuuzuki"
@@ -19,7 +19,7 @@
 		"type": "git",
 		"url": "https://github.com/Konno-Yuuzuki/vscode-nes"
 	},
-	"icon": "assets/nesweep.png",
+	"icon": "assets/zeta.png",
 	"license": "AGPL-3.0-or-later",
 	"private": true,
 	"engines": {
@@ -38,38 +38,38 @@
 	],
 	"contributes": {
 		"icons": {
-			"nesweep-idle": {
+			"zeta-idle": {
 				"description": "Zeta idle icon",
 				"default": {
-					"fontPath": "assets/nesweep-icons.woff2",
+					"fontPath": "assets/zeta-icons.woff2",
 					"fontCharacter": "\\ea01"
 				}
 			},
-			"nesweep-load-1": {
+			"zeta-load-1": {
 				"description": "Zeta loading frame 1 — |...",
 				"default": {
-					"fontPath": "assets/nesweep-icons.woff2",
+					"fontPath": "assets/zeta-icons.woff2",
 					"fontCharacter": "\\ea02"
 				}
 			},
-			"nesweep-load-2": {
+			"zeta-load-2": {
 				"description": "Zeta loading frame 2 — .|..",
 				"default": {
-					"fontPath": "assets/nesweep-icons.woff2",
+					"fontPath": "assets/zeta-icons.woff2",
 					"fontCharacter": "\\ea03"
 				}
 			},
-			"nesweep-load-3": {
+			"zeta-load-3": {
 				"description": "Zeta loading frame 3 — ..|.",
 				"default": {
-					"fontPath": "assets/nesweep-icons.woff2",
+					"fontPath": "assets/zeta-icons.woff2",
 					"fontCharacter": "\\ea04"
 				}
 			},
-			"nesweep-load-4": {
+			"zeta-load-4": {
 				"description": "Zeta loading frame 4 — ...|",
 				"default": {
-					"fontPath": "assets/nesweep-icons.woff2",
+					"fontPath": "assets/zeta-icons.woff2",
 					"fontCharacter": "\\ea05"
 				}
 			}
@@ -144,7 +144,7 @@
 		},
 		"configuration": [
 			{
-				"title": "Zeta: General & Sweep Context",
+				"title": "Zeta: General & Zeta Context",
 				"order": 10,
 				"properties": {
 					"zeta.enabled": {
@@ -152,7 +152,7 @@
 						"default": true,
 						"order": 10,
 						"scope": "window",
-						"markdownDescription": "Enable or disable NESweep suggestions for this window."
+						"markdownDescription": "Enable or disable Zeta suggestions for this window."
 					},
 					"zeta.streamEnabled": {
 						"type": "boolean",
@@ -173,21 +173,21 @@
 						"default": 0,
 						"order": 140,
 						"minimum": 0,
-						"markdownDescription": "Optional number of nearby active-file LSP Document Symbols to include for **all model formats**. The compact `context/outline` section names the active class/function path (for example `CTextDraw::Draw`) and can include methods, fields, enum members, globals, and other useful symbols; this avoids sparse C/C++ outlines where the language server flattens methods. Symbols are ranked by distance from the cursor and restored to source order. Collection is fully asynchronous, never delays a completion, and refreshes for every resolved document version, including dirty buffers; an obsolete provider response is discarded. VS Code may still invoke the language server when its own Outline cache has no model for the current document version. This is a separate compact budget and does not consume `#sweep.maxContextFiles#`. Keep the default `0` to avoid Document Symbol provider work; set a positive value to opt in."
+						"markdownDescription": "Optional number of nearby active-file LSP Document Symbols to include for **all model formats**. The compact `context/outline` section names the active class/function path (for example `CTextDraw::Draw`) and can include methods, fields, enum members, globals, and other useful symbols; this avoids sparse C/C++ outlines where the language server flattens methods. Symbols are ranked by distance from the cursor and restored to source order. Collection is fully asynchronous, never delays a completion, and refreshes for every resolved document version, including dirty buffers; an obsolete provider response is discarded. VS Code may still invoke the language server when its own Outline cache has no model for the current document version. This is a separate compact budget and does not consume `#zeta.maxContextFiles#`. Keep the default `0` to avoid Document Symbol provider work; set a positive value to opt in."
 					},
 					"zeta.maxEditHistory": {
 						"type": "number",
 						"default": 15,
 						"order": 110,
 						"minimum": 1,
-						"markdownDescription": "Total number of recent-edit diffs surfaced in the prompt. The budget is split: ~20% reserved as a floor for the active file so its history survives long stints in other files, ~40% spread across up to `#sweep.maxContextFiles#` other recent files, and the remainder fills from the active file's recent activity. Typing-burst edits on the same line within 60 s are coalesced before counting against the budget."
+						"markdownDescription": "Total number of recent-edit diffs surfaced in the prompt. The budget is split: ~20% reserved as a floor for the active file so its history survives long stints in other files, ~40% spread across up to `#zeta.maxContextFiles#` other recent files, and the remainder fills from the active file's recent activity. Typing-burst edits on the same line within 60 s are coalesced before counting against the budget."
 					},
 					"zeta.maxRecentChangesChars": {
 						"type": "number",
 						"default": 12000,
 						"order": 120,
 						"minimum": 0,
-						"markdownDescription": "Maximum number of characters from formatted recent-edit history to include in the prompt. `#sweep.maxEditHistory#` limits the number of diff records, while this limits their rendered size so large paste/format/bulk edits cannot overflow small model contexts. Set to `0` to omit recent-edit history."
+						"markdownDescription": "Maximum number of characters from formatted recent-edit history to include in the prompt. `#zeta.maxEditHistory#` limits the number of diff records, while this limits their rendered size so large paste/format/bulk edits cannot overflow small model contexts. Set to `0` to omit recent-edit history."
 					},
 					"zeta.includeClipboardContext": {
 						"type": "boolean",
@@ -212,7 +212,7 @@
 						"default": 5000,
 						"order": 190,
 						"minimum": 0,
-						"markdownDescription": "How long an identical-prompt completion result may be reused when `sweep.reuseIdenticalPromptResults` is enabled."
+						"markdownDescription": "How long an identical-prompt completion result may be reused when `zeta.reuseIdenticalPromptResults` is enabled."
 					},
 					"zeta.autocompleteExclusionPatterns": {
 						"type": "array",
@@ -229,13 +229,13 @@
 							"**/.dev.vars",
 							"**/secrets.yml"
 						],
-						"markdownDescription": "File globs / suffixes that NESweep should never request completions for. Defaults cover the common secret-bearing files (`.env`, `.pem`, `.key`, …) so request bodies don't leak credentials to the completion server. Add project-specific patterns to extend."
+						"markdownDescription": "File globs / suffixes that Zeta should never request completions for. Defaults cover the common secret-bearing files (`.env`, `.pem`, `.key`, …) so request bodies don't leak credentials to the completion server. Add project-specific patterns to extend."
 					},
 					"zeta.autocompleteSnoozeUntil": {
 						"type": "number",
 						"default": 0,
 						"order": 60,
-						"markdownDescription": "Pause completions until the given Unix timestamp (milliseconds). `0` disables the snooze. Set via the `NESweep: Snooze` command rather than editing this directly."
+						"markdownDescription": "Pause completions until the given Unix timestamp (milliseconds). `0` disables the snooze. Set via the `Zeta: Snooze` command rather than editing this directly."
 					},
 					"zeta.useCopilotStyleNextEditPresentation": {
 						"type": "boolean",
@@ -245,7 +245,7 @@
 						"tags": [
 							"experimental"
 						],
-						"markdownDescription": "Use VS Code's proposed inline edit presentation for next-edit suggestions.\n\n**Warning:** this depends on VS Code proposed API. It only works in VS Code Insiders launched with `--enable-proposed-api=sr-team.nesweep`; without that flag, VS Code may silently ignore the proposed inline completion fields."
+						"markdownDescription": "Use VS Code's proposed inline edit presentation for next-edit suggestions.\n\n**Warning:** this depends on VS Code proposed API. It only works in VS Code Insiders launched with `--enable-proposed-api=Yuuzuki.zeta-edit-prediction`; without that flag, VS Code may silently ignore the proposed inline completion fields."
 					},
 					"zeta.serverUrl": {
 						"type": "string",
@@ -255,9 +255,9 @@
 					},
 					"zeta.modelName": {
 						"type": "string",
-						"default": "sweepai/sweep-next-edit",
+						"default": "zeta-edit-prediction",
 						"order": 30,
-						"markdownDescription": "Model name sent in the request body's `model` field. The prompt format is auto-selected by substring match against this name:\n\n- **Zeta-2.1 (multi-region)** — names containing `zeta-2.1`, `zeta2.1`, `zeta-2-1`, or `zeta_2_1`. Uses Zed V0318-style numbered boundaries such as `<|marker_1|>` / `<|marker_2|>` throughout one contiguous editable excerpt.\n- **Zeta-2 (single-region SeedCoder FIM)** — names containing `zeta-2`, `zeta2`, or `seedcoder`. Uses the legacy git-conflict scaffold `<<<<<<< CURRENT` / `=======` / `>>>>>>> UPDATED`.\n- **Sweep `<|file_sep|>` layout** — anything else (including the default `sweepai/sweep-next-edit`). Uses the broad-context + retrieval + `original/current/updated` triplet structure ported from cursortab.nvim."
+						"markdownDescription": "Model name sent in the request body's `model` field. The prompt format is auto-selected by substring match against this name:\n\n- **Zeta-2.1 (multi-region)** — names containing `zeta-2.1`, `zeta2.1`, `zeta-2-1`, or `zeta_2_1`. Uses Zed V0318-style numbered boundaries such as `<|marker_1|>` / `<|marker_2|>` throughout one contiguous editable excerpt.\n- **Zeta-2 (single-region SeedCoder FIM)** — names containing `zeta-2`, `zeta2`, or `seedcoder`. Uses the legacy git-conflict scaffold `<<<<<<< CURRENT` / `=======` / `>>>>>>> UPDATED`.\n- **Zeta 2 (fallback)** — anything else. Uses the legacy format."
 					},
 					"zeta.completionTimeoutMs": {
 						"type": "number",
@@ -269,7 +269,7 @@
 						"type": "boolean",
 						"default": false,
 						"order": 45,
-						"markdownDescription": "Request a fresh next-edit completion after the cursor moves at least half the height of the editable line window used by the last model request, even when the document text did not change. This keeps cursor navigation responsive for next-edit models without firing for small navigation steps. The request is debounced by `#sweep.contextExitRetriggerDebounceMs#`."
+						"markdownDescription": "Request a fresh next-edit completion after the cursor moves at least half the height of the editable line window used by the last model request, even when the document text did not change. This keeps cursor navigation responsive for next-edit models without firing for small navigation steps. The request is debounced by `#zeta.contextExitRetriggerDebounceMs#`."
 					},
 					"zeta.contextExitRetriggerDebounceMs": {
 						"type": "number",
@@ -288,19 +288,19 @@
 						"type": "number",
 						"default": 3000,
 						"order": 150,
-						"markdownDescription": "Soft cap on the size of per-language instructions files (`.vscode/nes-<languageId>.md`).\n\nRules sit at the **front** of every completion prompt — a prefix-cache-friendly slot, so a server with prompt caching (llama.cpp with `-cpent 256` to checkpoint every 256 tokens, vLLM/sglang prefix caching on by default) only re-evaluates the rules block on the first request or when the file changes. The cost of a fat rules file is therefore:\n\n- **Context budget** consumed on every request, even when cached.\n- **Prompt-eval latency spike** on first request and after every save.\n- **No caching benefit at all** if your server has caching off or the threshold is set above the rules-block size.\n\nOverflow surfaces as a Warning diagnostic + red background on the over-limit region in the editor; it does **not** truncate the file or block completions. Set to `0` to disable the warning.\n\nDefault `3000` ≈ ~1000 tokens on the Sweep tokenizer — a reasonable budget for session-stable guidance."
+						"markdownDescription": "Soft cap on the size of per-language instructions files (`.vscode/nes-<languageId>.md`).\n\nRules sit at the **front** of every completion prompt — a prefix-cache-friendly slot, so a server with prompt caching (llama.cpp with `-cpent 256` to checkpoint every 256 tokens, vLLM/sglang prefix caching on by default) only re-evaluates the rules block on the first request or when the file changes. The cost of a fat rules file is therefore:\n\n- **Context budget** consumed on every request, even when cached.\n- **Prompt-eval latency spike** on first request and after every save.\n- **No caching benefit at all** if your server has caching off or the threshold is set above the rules-block size.\n\nOverflow surfaces as a Warning diagnostic + red background on the over-limit region in the editor; it does **not** truncate the file or block completions. Set to `0` to disable the warning.\n\nDefault `3000` ≈ ~1000 tokens on the Zeta tokenizer — a reasonable budget for session-stable guidance."
 					},
 					"zeta.injectInlineDiagnostics": {
 						"type": "boolean",
 						"default": false,
 						"order": 230,
-						"markdownDescription": "**Mega-hack: inline `// BUG:` comments next to every nearby diagnosed line in the prompt only.**\n\nAppends `<commentPrefix> <marker> (code: <code>) - <message>` to each diagnosed line in the rendered prompt — inline placement next to the affected token gets the model to attend to LSP errors much more reliably than a sibling diagnostics section. The fake comments are stripped from the response before applying, anchored on the literal `<commentPrefix> <marker>` substring so the strip survives the model paraphrasing the rest of the message body.\n\n**When to enable:**\n- ✅ **0.5B / 1.5B SweepAI checkpoints** — they routinely ignore the structured diagnostics section and need the inline nudge.\n- ❌ **7B SweepAI (default) and 8B Zeta-2 / Zeta-2.1 SeedCoder** — strong enough to pick up the structured block; the inline noise just bloats the prompt.\n\nWhen on, the structured `context/diagnostics` section is suppressed so the same data isn't emitted twice."
+						"markdownDescription": "**Mega-hack: inline `// BUG:` comments next to every nearby diagnosed line in the prompt only.**\n\nAppends `<commentPrefix> <marker> (code: <code>) - <message>` to each diagnosed line in the rendered prompt — inline placement next to the affected token gets the model to attend to LSP errors much more reliably than a sibling diagnostics section. The fake comments are stripped from the response before applying, anchored on the literal `<commentPrefix> <marker>` substring so the strip survives the model paraphrasing the rest of the message body.\n\n**When to enable:**\n- ✅ **0.5B / 1.5B ZetaAI checkpoints** — they routinely ignore the structured diagnostics section and need the inline nudge.\n- ❌ **7B ZetaAI (default) and 8B Zeta-2 / Zeta-2.1 SeedCoder** — strong enough to pick up the structured block; the inline noise just bloats the prompt.\n\nWhen on, the structured `context/diagnostics` section is suppressed so the same data isn't emitted twice."
 					},
 					"zeta.inlineDiagnosticsMarker": {
 						"type": "string",
 						"default": "BUG: LSP error here",
 						"order": 240,
-						"markdownDescription": "Marker phrase emitted between the language's comment prefix and the diagnostic body when `sweep.injectInlineDiagnostics` is on.\n\nFor C/C++ the default produces:\n```\n// BUG: LSP error here (code: undeclared_var_use_suggest) - use 'spdlog' instead (Use of undeclared identifier 'psdlog')\n```\n\nMust be a phrase a human would essentially never type — the response-side strip pinpoints our injections by matching the literal `<commentPrefix> <marker>` substring, so colliding with user-authored `TODO:` / `FIXME:` comments is undesirable. Different small models seem to attend to different phrasings; tune per model if the default doesn't get traction."
+						"markdownDescription": "Marker phrase emitted between the language's comment prefix and the diagnostic body when `zeta.injectInlineDiagnostics` is on.\n\nFor C/C++ the default produces:\n```\n// BUG: LSP error here (code: undeclared_var_use_suggest) - use 'spdlog' instead (Use of undeclared identifier 'psdlog')\n```\n\nMust be a phrase a human would essentially never type — the response-side strip pinpoints our injections by matching the literal `<commentPrefix> <marker>` substring, so colliding with user-authored `TODO:` / `FIXME:` comments is undesirable. Different small models seem to attend to different phrasings; tune per model if the default doesn't get traction."
 					},
 					"zeta.diagnosticsMessageTransforms": {
 						"type": "object",
@@ -328,7 +328,7 @@
 						"default": 2000,
 						"order": 10,
 						"minimum": 1,
-						"markdownDescription": "Approximate total token budget for the active current-file context. NESweep estimates **1 token per 3 UTF-8 bytes** and keeps complete lines. For Sweep, this controls the leading broad-context section with a **2/3 before cursor / 1/3 after cursor** target; unused budget is used on the available side at a file boundary. For Zeta-2 / Zeta-2.1, it controls the line-aligned editable excerpt. Default `2000`."
+						"markdownDescription": "Approximate total token budget for the active current-file context. Zeta estimates **1 token per 3 UTF-8 bytes** and keeps complete lines. For Zeta, this controls the leading broad-context section with a **2/3 before cursor / 1/3 after cursor** target; unused budget is used on the available side at a file boundary. For Zeta-2 / Zeta-2.1, it controls the line-aligned editable excerpt. Default `2000`."
 					},
 					"zeta.zetaContextTokens": {
 						"type": "number",

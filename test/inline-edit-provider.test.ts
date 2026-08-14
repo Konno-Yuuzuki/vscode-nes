@@ -53,8 +53,9 @@ function buildItem(
 		) => vscode.InlineCompletionList | undefined;
 	};
 
-	return provider.buildCompletionItem(document, position, result, options)
-		?.items[0];
+	return (
+		provider.buildCompletionItem(document, position, result, options)
+	)?.items[0];
 }
 
 function normalizeResult(
@@ -160,7 +161,7 @@ afterEach(() => {
 });
 
 describe("InlineEditProvider cursor context retrigger", () => {
-	test("triggers once after a debounced exit from the editable window", async () => {
+	test("triggers once after a debounced exit from the editable window", () => {
 		setMockConfiguration({
 			retriggerOnContextExit: true,
 			contextExitRetriggerDebounceMs: 0,
@@ -212,13 +213,17 @@ describe("InlineEditProvider buildCompletionItem", () => {
 		const cursorOffset = "const value = ".length;
 		const document = makeOneLineDocument(text);
 
-		const item = buildItem(document, new vscode.Position(0, cursorOffset), {
-			id: "non-prefix-replacement",
-			startIndex: cursorOffset,
-			endIndex: text.length,
-			completion: "newCall()",
-			confidence: 0.8,
-		});
+		const item = buildItem(
+			document,
+			new vscode.Position(0, cursorOffset),
+			{
+				id: "non-prefix-replacement",
+				startIndex: cursorOffset,
+				endIndex: text.length,
+				completion: "newCall()",
+				confidence: 0.8,
+			},
+		);
 
 		expect(item?.filterText).toBe("oldCall();");
 	});
@@ -228,13 +233,17 @@ describe("InlineEditProvider buildCompletionItem", () => {
 		const cursorOffset = "const value = ".length;
 		const document = makeOneLineDocument(text);
 
-		const item = buildItem(document, new vscode.Position(0, cursorOffset), {
-			id: "prefix-replacement",
-			startIndex: cursorOffset,
-			endIndex: text.length,
-			completion: "highWatermark",
-			confidence: 0.8,
-		});
+		const item = buildItem(
+			document,
+			new vscode.Position(0, cursorOffset),
+			{
+				id: "prefix-replacement",
+				startIndex: cursorOffset,
+				endIndex: text.length,
+				completion: "highWatermark",
+				confidence: 0.8,
+			},
+		);
 
 		expect(item?.filterText).toBeUndefined();
 	});
@@ -259,12 +268,11 @@ describe("InlineEditProvider buildCompletionItem", () => {
 				confidence: 0.8,
 			},
 			{ useProposedInlineEditPresentation: true },
-		) as vscode.InlineCompletionItem & {
+		)) as vscode.InlineCompletionItem & 
 			isInlineEdit?: boolean;
 			showInlineEditMenu?: boolean;
 			showRange?: vscode.Range;
-			displayLocation?: unknown;
-		};
+			displayLocation?: unknown;;
 
 		expect(item?.isInlineEdit).toBe(true);
 		expect(item?.showInlineEditMenu).toBe(true);
@@ -294,7 +302,7 @@ describe("InlineEditProvider buildCompletionItem", () => {
 				cursorTargetOffset: 0,
 			},
 			{ useProposedInlineEditPresentation: true },
-		) as vscode.InlineCompletionItem & { isInlineEdit?: boolean };
+		)) as vscode.InlineCompletionItem & isInlineEdit?: boolean ;
 
 		expect(item?.isInlineEdit).toBe(true);
 		expect(typeof item?.insertText).toBe("string");
@@ -560,7 +568,7 @@ describe("InlineEditProvider normalizeInlineResult", () => {
 			new vscode.Position(0, startIndex),
 			normalized,
 			{ useProposedInlineEditPresentation: true },
-		) as vscode.InlineCompletionItem & { isInlineEdit?: boolean };
+		)) as vscode.InlineCompletionItem & isInlineEdit?: boolean ;
 		expect(item?.isInlineEdit).toBe(true);
 		expect(applyOneLineItem(text, item)).toBe("keep ");
 	});

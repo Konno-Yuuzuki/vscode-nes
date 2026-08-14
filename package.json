@@ -2,7 +2,7 @@
 	"name": "nesweep",
 	"displayName": "NESweep autocompletion",
 	"description": "Next Edit Autocomplete using Sweep Model",
-	"version": "1.2.7",
+	"version": "1.2.8-preview",
 	"publisher": "SR-team",
 	"author": {
 		"name": "SR_team"
@@ -116,11 +116,6 @@
 			{
 				"command": "sweep.acceptJumpEdit",
 				"key": "tab",
-				"when": "editorTextFocus && sweep.hasJumpEdit && !editorHasSelection && !inlineSuggestionVisible && !suggestWidgetVisible"
-			},
-			{
-				"command": "sweep.acceptJumpEdit",
-				"key": "alt+tab",
 				"when": "editorTextFocus && sweep.hasJumpEdit && !editorHasSelection"
 			},
 			{
@@ -139,21 +134,14 @@
 				"when": "editorTextFocus && sweep.hasJumpEdit"
 			},
 			{
-				"command": "editor.action.inlineSuggest.commit",
-				"key": "alt+tab",
-				"when": "editorTextFocus && inlineSuggestionVisible && suggestWidgetVisible && !editorHasSelection && !sweep.hasJumpEdit && !inSnippetMode"
-			},
-			{
-				"command": "editor.action.inlineSuggest.commit",
-				"key": "alt+l",
-				"when": "isLinux && editorTextFocus && inlineSuggestionVisible && suggestWidgetVisible && !editorHasSelection && !sweep.hasJumpEdit && !inSnippetMode"
-			},
-			{
 				"command": "editor.action.inlineSuggest.hide",
 				"key": "escape",
-				"when": "editorTextFocus && inlineSuggestionVisible && !suggestWidgetVisible && !sweep.hasJumpEdit"
+				"when": "editorTextFocus && inlineSuggestionVisible && !sweep.hasJumpEdit"
 			}
 		],
+		"configurationDefaults": {
+			"editor.inlineSuggest.suppressSuggestions": true
+		},
 		"configuration": [
 			{
 				"title": "NESweep: General & Sweep Context",

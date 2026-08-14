@@ -423,7 +423,7 @@ export class ApiClient {
 						{
 							model: config.modelName,
 							prompt: prompt.prompt,
-							temperature: TEMPERATURE,
+							temperature: config.temperature,
 							maxTokens: MAX_TOKENS,
 							stop: prompt.stopTokens,
 							timeoutMs: config.completionTimeoutMs,
@@ -445,7 +445,7 @@ export class ApiClient {
 						{
 							model: config.modelName,
 							prompt: prompt.prompt,
-							temperature: TEMPERATURE,
+							temperature: config.temperature,
 							maxTokens: MAX_TOKENS,
 							stop: prompt.stopTokens,
 							timeoutMs: config.completionTimeoutMs,
@@ -551,7 +551,7 @@ export class ApiClient {
 				JSON.stringify({
 					model: config.modelName,
 					prompt: prompt.prompt,
-					temperature: TEMPERATURE,
+					temperature: config.temperature,
 					maxTokens: MAX_TOKENS,
 					stop: prompt.stopTokens,
 				}),
@@ -895,6 +895,7 @@ export class ApiClient {
 	}
 
 	private async buildClipboardChunks(): Promise<FileChunk[]> {
+		if (!config.includeClipboard) return [];
 		try {
 			const clipboard = (await vscode.env.clipboard.readText()).trim();
 			if (!clipboard) return [];

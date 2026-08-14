@@ -34,6 +34,27 @@ export class SweepConfig {
 		return this.config.get<boolean>("enabled", true);
 	}
 
+	get streamEnabled(): boolean {
+		return this.config.get<boolean>("streamEnabled", true);
+	}
+
+	/**
+	 * Include clipboard content as context in the prompt. Disabled by default
+	 * because clipboard text (error messages, logs, terminal output) often
+	 * confuses the model more than it helps.
+	 */
+	get includeClipboard(): boolean {
+		return this.config.get<boolean>("includeClipboard", false);
+	}
+
+	/**
+	 * Sampling temperature for the model. Lower values (0.0–0.2) are more
+	 * deterministic; higher values (0.3–0.8) increase creativity.
+	 */
+	get temperature(): number {
+		return this.config.get<number>("temperature", 0.0);
+	}
+
 	get maxContextFiles(): number {
 		return this.nonNegativeInteger(
 			"maxContextFiles",

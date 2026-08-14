@@ -334,6 +334,10 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		response: Promise<AutocompleteResult[] | null>;
 	} | null = null;
 	private lastRequestTimestamp = 0;
+	/** Content snapshot from the last invocation that passed the content-change
+	 *  check. Used to avoid re-triggering on cursor-movement-only invocations
+	 *  after the file has been edited. */
+	private lastContent: string | null = null;
 	private editableContextWindow: EditableContextWindow | null = null;
 	private pendingProposedJump: PendingProposedJump | null = null;
 
@@ -403,26 +407,18 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 			return undefined;
 		}
 
-		// Normal automatic suggestions require an edit. Context-exit retriggers
-		// invoke VS Code's inline-suggest command explicitly, and their purpose
-		// is precisely to ask for a next edit at a new cursor location even when
-		// the document bytes are unchanged.
+		// Normal automatic suggestions require content to have changed since
+		// the last invocation that passed the content-change check. This
+		// prevents cursor-movement-only invocations from resetting the debounce
+		// and silently cancelling the in-flight request.
 		if (
-			currentContent === originalContent &&
+			this.lastContent !== null &&
+			currentContent === this.lastContent &&
 			context.triggerKind !== vscode.InlineCompletionTriggerKind.Invoke
 		) {
-			// If the tracker hasn't seen this URI yet, originalContent falls
-			// back to currentContent above, making the check always-true and
-			// silently blocking every request. Log the case so we can tell
-			// whether the file is genuinely untouched vs. un-tracked.
-			if (!this.tracker.getOriginalContent(uri)) {
-				logger.debug(
-					"Suppressing inline edit: document not tracked by tracker",
-					{ uri, requestId },
-				);
-			}
 			return undefined;
 		}
+		this.lastContent = currentContent;
 
 		// Only update latestRequestId AFTER passing all early-return checks.
 		// This prevents cursor-movement-only invocations (which fail the

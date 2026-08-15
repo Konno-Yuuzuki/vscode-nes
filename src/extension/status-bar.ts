@@ -23,6 +23,7 @@ export class SweepStatusBar implements vscode.Disposable {
 	private apiClient: ApiClient;
 	private loadingTimer: ReturnType<typeof setInterval> | null = null;
 	private loadingIndex = 0;
+	private hintText = "";
 
 	constructor(_context: vscode.ExtensionContext, apiClient: ApiClient) {
 		this.apiClient = apiClient;
@@ -46,6 +47,18 @@ export class SweepStatusBar implements vscode.Disposable {
 		);
 
 		this.statusBarItem.show();
+	}
+
+	/** Set a hint text shown after the icon (e.g. keyboard shortcuts). */
+	setHint(hint: string): void {
+		this.hintText = hint;
+		this.applyText(this.apiClient.isProcessing);
+	}
+
+	/** Clear the hint text. */
+	clearHint(): void {
+		this.hintText = "";
+		this.applyText(this.apiClient.isProcessing);
 	}
 
 	private updateStatusBar(): void {
@@ -80,7 +93,8 @@ export class SweepStatusBar implements vscode.Disposable {
 
 	private applyText(loading: boolean): void {
 		const icon = loading ? LOADING_FRAMES[this.loadingIndex] : "zeta-idle";
-		this.statusBarItem.text = `$(${icon})`;
+		const hint = this.hintText ? `  ${this.hintText}` : "";
+		this.statusBarItem.text = `$(${icon})${hint}`;
 	}
 
 	private buildTooltip(isEnabled: boolean, isSnoozed: boolean): string {

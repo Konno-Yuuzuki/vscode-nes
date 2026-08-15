@@ -274,6 +274,14 @@ export function activate(context: vscode.ExtensionContext) {
 	);
 
 	statusBar = new SweepStatusBar(context, apiClient);
+	// Connect jump edit state changes to status bar hint.
+	jumpEditManager.setOnHintChange((hint) => {
+		if (hint) {
+			statusBar?.setHint(hint);
+		} else {
+			statusBar?.clearHint();
+		}
+	});
 	const statusBarCommands = registerStatusBarCommands(
 		context,
 		completionServer,
@@ -416,9 +424,8 @@ class ErrorMonitor {
 			this.record(fmt(args));
 			origError(...args);
 		};
-		this.disposable = vscode.commands.registerCommand(
-			"zeta.showErrorLog",
-			() => this.show(),
+		this.disposable = vscode.commands.registerCommand("zeta.showErrorLog", () =>
+			this.show(),
 		);
 	}
 

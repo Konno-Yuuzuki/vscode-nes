@@ -49,10 +49,8 @@ export class JumpEditManager implements vscode.Disposable {
 		{},
 	);
 	private refreshNonce = 0;
-	private onHintChange: ((hint: string) => void) | null = null;
 
-	constructor(onHintChange?: (hint: string) => void) {
-		this.onHintChange = onHintChange ?? null;
+	constructor() {
 		this.disposables.push(
 			vscode.workspace.onDidChangeTextDocument((event) => {
 				if (
@@ -188,12 +186,6 @@ export class JumpEditManager implements vscode.Disposable {
 
 		this.applyDecorations(editor, document);
 		vscode.commands.executeCommand("setContext", "zeta.hasJumpEdit", true);
-		const lineCount = result.completion.split("\n").length;
-		const hint =
-			lineCount > 1
-				? `Jump edit at line ${startLine + 1}  (Alt+Tab all, Ctrl+Enter line, Esc dismiss)`
-				: `Jump edit at line ${startLine + 1}  (Alt+Tab accept, Esc dismiss)`;
-		this.onHintChange?.(hint);
 	}
 
 	handleCursorMove(position: vscode.Position): void {
@@ -674,15 +666,9 @@ export class JumpEditManager implements vscode.Disposable {
 		this.pendingJumpEdit = null;
 		this.clearDecorations();
 		vscode.commands.executeCommand("setContext", "zeta.hasJumpEdit", false);
-		this.onHintChange?.("");
 		if (hadPending) {
 			logger.debug("Jump edit state cleared");
 		}
-	}
-
-	/** Set a callback invoked when the hint string changes (e.g. for status bar). */
-	setOnHintChange(callback: (hint: string) => void): void {
-		this.onHintChange = callback;
 	}
 
 	private clearDecorations(): void {

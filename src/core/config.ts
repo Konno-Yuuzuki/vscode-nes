@@ -115,7 +115,10 @@ export class SweepConfig {
 		return this.config.get<string>("serverUrl", DEFAULT_SERVER_URL);
 	}
 
-	
+	get modelName(): string {
+		return this.config.get<string>("modelName", MODEL_NAME);
+	}
+
 	get completionTimeoutMs(): number {
 		return this.config.get<number>(
 			"completionTimeoutMs",

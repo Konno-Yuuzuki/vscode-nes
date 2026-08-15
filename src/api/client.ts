@@ -339,6 +339,9 @@ export class ApiClient {
 		input: AutocompleteInput,
 		signal?: AbortSignal,
 	): Promise<AutocompleteResult[] | null> {
+		logger.trace(
+			`getAutocomplete ENTERED req promptChars=${input.document.getText().length}`,
+		);
 		const documentText = input.document.getText();
 		if (isFileTooLarge(documentText) || isFileTooLarge(input.originalContent)) {
 			logger.debug("Skipping autocomplete request: file too large", {
@@ -349,7 +352,9 @@ export class ApiClient {
 		}
 
 		const format = detectModelFormat(config.modelName);
+		logger.trace(`getAutocomplete: before buildRequest format=${format}`);
 		const requestData = await this.buildRequest(input, format);
+		logger.trace(`getAutocomplete: after buildRequest`);
 		const parsedRequest = AutocompleteRequestSchema.safeParse(requestData);
 		if (!parsedRequest.success) {
 			logger.error("Invalid request data:", parsedRequest.error.message);
@@ -928,33 +933,37 @@ export class ApiClient {
 	}
 
 	private async buildDefinitionChunks(
-		document: vscode.TextDocument,
-		position: vscode.Position,
-		currentFileContextRange: {
-			startLine: number;
-			endLine: number;
-		} | null,
-	): Promise<FileChunk[]> {
-		try {
-			const results =
-				(await vscode.commands.executeCommand<
-					Array<vscode.Location | vscode.LocationLink> | undefined
-				>("vscode.executeDefinitionProvider", document.uri, position)) ?? [];
-			const locations = results
-				.map((result) => this.normalizeLocation(result))
-				.filter((location): location is vscode.Location => location !== null)
-				.filter((location) =>
-					this.isUsefulRetrievalLocation(
-						location,
-						document.uri,
-						currentFileContextRange,
-					),
-				);
-			return this.buildLocationChunks(locations, MAX_DEFINITION_CHUNKS);
-		} catch {
-			return [];
+			document: vscode.TextDocument,
+			position: vscode.Position,
+			currentFileContextRange: {
+				startLine: number;
+				endLine: number;
+			} | null,
+		): Promise<FileChunk[]> {
+			try {
+				const results =
+					(await this.withTimeout(
+						vscode.commands.executeCommand<
+							Array<vscode.Location | vscode.LocationLink> | undefined
+						>("vscode.executeDefinitionProvider", document.uri, position),
+						2000,
+						[],
+					)) ?? [];
+				const locations = results
+					.map((result) => this.normalizeLocation(result))
+					.filter((location): location is vscode.Location => location !== null)
+					.filter((location) =>
+						this.isUsefulRetrievalLocation(
+							location,
+							document.uri,
+							currentFileContextRange,
+						),
+					);
+				return this.buildLocationChunks(locations, MAX_DEFINITION_CHUNKS);
+			} catch {
+				return [];
+			}
 		}
-	}
 
 	private async buildUsageChunks(
 		document: vscode.TextDocument,
@@ -965,25 +974,50 @@ export class ApiClient {
 		} | null,
 	): Promise<FileChunk[]> {
 		try {
-			const results =
-				(await vscode.commands.executeCommand<vscode.Location[] | undefined>(
-					"vscode.executeReferenceProvider",
-					document.uri,
-					position,
-				)) ?? [];
-			return this.buildLocationChunks(
-				results.filter((location) =>
-					this.isUsefulRetrievalLocation(
-						location,
-						document.uri,
-						currentFileContextRange,
-					),
-				),
-				MAX_USAGE_CHUNKS,
-			);
-		} catch {
-			return [];
+				const results =
+					(await this.withTimeout(
+						vscode.commands.executeCommand<
+							Array<vscode.Location | vscode.LocationLink> | undefined
+						>("vscode.executeReferenceProvider", document.uri, position),
+						2000,
+						[],
+					)) ?? [];
+				const locations = results
+					.map((result) => this.normalizeLocation(result))
+					.filter((location): location is vscode.Location => location !== null)
+					.filter((location) =>
+						this.isUsefulRetrievalLocation(
+							location,
+							document.uri,
+							currentFileContextRange,
+						),
+					);
+				return this.buildLocationChunks(locations, MAX_USAGE_CHUNKS);
+			} catch {
+				return [];
+			}
 		}
+
+		private async withTimeout<T>(
+		promise: Thenable<T>,
+		ms: number,
+		defaultValue: T,
+	): Promise<T> {
+		return new Promise<T>((resolve) => {
+			const timer = setTimeout(() => {
+				resolve(defaultValue);
+			}, ms);
+			Promise.resolve(promise).then(
+				(result) => {
+					clearTimeout(timer);
+					resolve(result);
+				},
+				() => {
+					clearTimeout(timer);
+					resolve(defaultValue);
+				},
+			);
+		});
 	}
 
 	private normalizeLocation(

@@ -340,6 +340,13 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 	private lastContent: string | null = null;
 	private editableContextWindow: EditableContextWindow | null = null;
 	private pendingProposedJump: PendingProposedJump | null = null;
+	/** Cached diagnostics for the current document, refreshed on
+	 *  onDidChangeDiagnostics events. Avoids synchronous
+	 *  vscode.languages.getDiagnostics() which can block the extension
+	 *  host when the language server is busy (e.g. rust-analyzer first
+	 *  indexing). */
+	private cachedDiagnostics: vscode.Diagnostic[] = [];
+	private cachedDiagnosticsUri: string | null = null;
 
 	constructor(
 		tracker: DocumentTracker,
@@ -353,6 +360,11 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		api.onPartialResult = (text: string) => {
 			logger.trace("Streaming partial result chunk:", text.slice(-120));
 		};
+		// Cache diagnostics asynchronously so buildInput never blocks on
+		// vscode.languages.getDiagnostics() (which can stall when the
+		// language server is busy, e.g. rust-analyzer indexing).
+		this.refreshDiagnostics = this.refreshDiagnostics.bind(this);
+		vscode.languages.onDidChangeDiagnostics(this.refreshDiagnostics);
 	}
 
 	async provideInlineCompletionItems(
@@ -447,10 +459,24 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		if (!this.isLatestRequest(requestId)) return undefined;
 
 		const setupOriginate = (): Promise<AutocompleteResult[] | null> => {
-			this.cancelInFlightRequest("superseded by new request");
-			this.rememberEditableContextWindow(document, requestSnapshot);
-			const controller = new AbortController();
-			const input = this.buildInput(document, position, originalContent);
+			logger.trace(`setupOriginate called for req=${requestId}`);
+			let input;
+			let controller;
+			try {
+				this.cancelInFlightRequest("superseded by new request");
+				this.rememberEditableContextWindow(document, requestSnapshot);
+				controller = new AbortController();
+				logger.trace(`setupOriginate: before buildInput for req=${requestId}`);
+				input = this.buildInput(document, position, originalContent);
+			} catch (e) {
+				const msg = e instanceof Error ? e.stack || e.message : String(e);
+				logger.error(`setupOriginate error: ${msg}`);
+				console.error(`[Zeta] setupOriginate error: ${msg}`);
+				return Promise.resolve(null);
+			}
+			logger.trace(
+				`setupOriginate: after buildInput for req=${requestId}, before getAutocomplete`,
+			);
 			const promise = this.api.getAutocomplete(input, controller.signal);
 			const inFlight = {
 				id: requestId,
@@ -862,6 +888,9 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		this.lastRequestTimestamp = now;
 
 		const delay = Math.max(0, INLINE_REQUEST_DEBOUNCE_MS - elapsed);
+		logger.trace(
+			`waitForDebounce req=${requestId} elapsed=${elapsed} delay=${delay} tokenCancelled=${token.isCancellationRequested} isLatest=${this.isLatestRequest(requestId)}`,
+		);
 		if (delay === 0) return !token.isCancellationRequested;
 
 		await new Promise<void>((resolve) => {
@@ -1578,6 +1607,17 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		return insertedText.length > 0 ? insertedText : null;
 	}
 
+	private refreshDiagnostics(e: vscode.DiagnosticChangeEvent): void {
+		const activeUri = vscode.window.activeTextEditor?.document.uri;
+		if (
+			activeUri &&
+			e.uris.some((u) => u.toString() === activeUri.toString())
+		) {
+			this.cachedDiagnostics = vscode.languages.getDiagnostics(activeUri);
+			this.cachedDiagnosticsUri = activeUri.toString();
+		}
+	}
+
 	private buildInput(
 		document: vscode.TextDocument,
 		position: vscode.Position,
@@ -1603,7 +1643,10 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 			originalContent,
 			recentChanges,
 			recentBuffers,
-			diagnostics: vscode.languages.getDiagnostics(document.uri),
+			diagnostics:
+				this.cachedDiagnosticsUri === document.uri.toString()
+					? this.cachedDiagnostics
+					: vscode.languages.getDiagnostics(document.uri),
 			userActions,
 		};
 	}

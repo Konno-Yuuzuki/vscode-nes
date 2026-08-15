@@ -65,10 +65,8 @@ export function markAsProposedInlineEdit(
 
 export function enableForwardStability(
 	list: vscode.InlineCompletionList,
-): ProposedInlineCompletionList {
-	const proposed = list as ProposedInlineCompletionList;
-	proposed.enableForwardStability = true;
-	return proposed;
+): vscode.InlineCompletionList {
+	return list;
 }
 
 export function registerInlineCompletionItemProviderWithMetadata(

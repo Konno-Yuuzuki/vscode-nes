@@ -15,9 +15,10 @@ import {
 } from "~/editor/syntax-highlight-renderer.ts";
 import { RulesDiagnostics } from "~/extension/rules-diagnostics.ts";
 import {
-	registerStatusBarCommands,
 	SweepStatusBar,
+	registerStatusBarCommands,
 } from "~/extension/status-bar.ts";
+import { LoadingIndicatorDecoration } from "~/editor/loading-indicator.ts";
 import { CompletionServer } from "~/services/completion-server.ts";
 import { DocumentTracker } from "~/telemetry/document-tracker.ts";
 
@@ -25,6 +26,7 @@ let tracker: DocumentTracker;
 let jumpEditManager: JumpEditManager;
 let provider: InlineEditProvider;
 let statusBar: SweepStatusBar;
+let loadingIndicator: LoadingIndicatorDecoration;
 let completionServer: CompletionServer;
 let copilotStylePresentationWarningShown = false;
 
@@ -357,6 +359,7 @@ export function activate(context: vscode.ExtensionContext) {
 			);
 
 			statusBar = new SweepStatusBar(context, apiClient);
+			loadingIndicator = new LoadingIndicatorDecoration(apiClient);
 	const statusBarCommands = registerStatusBarCommands(
 		context,
 		completionServer,

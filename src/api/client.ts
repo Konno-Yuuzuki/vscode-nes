@@ -5,7 +5,6 @@ import * as vscode from "vscode";
 import { config } from "~/core/config.ts";
 import {
 	DEFAULT_MAX_RECENT_CHANGES_CHARS,
-	MAX_TOKENS,
 	TEMPERATURE,
 	ZETA_TRAINING_TEMPLATE_MAX_EDIT_EVENTS,
 } from "~/core/constants.ts";
@@ -66,7 +65,6 @@ const MAX_DEFINITION_CHUNKS = 6;
 const MAX_USAGE_CHUNKS = 6;
 const RETRIEVAL_CONTEXT_LINES_ABOVE = 9;
 const RETRIEVAL_CONTEXT_LINES_BELOW = 9;
-const MAX_CLIPBOARD_LINES = 20;
 const MAX_DIAGNOSTICS = 15;
 const RECENT_CHANGE_TRUNCATION_MARKER = "\n...[truncated]\n";
 const MIN_TRUNCATED_RECENT_CHANGE_CHARS = 120;
@@ -403,7 +401,7 @@ export class ApiClient {
 		const reqStarted = Date.now();
 		const promptCacheKey = this.getPromptCacheKey(prompt);
 		logger.info(
-			`→ /v1/completions format=${format} model=${config.modelName} max_tokens=${MAX_TOKENS} prompt_chars=${prompt.prompt.length}`,
+			`→ /v1/completions format=${format} model=${config.modelName} temperature=${config.temperature} max_tokens=${config.maxTokens} stop=${prompt.stopTokens.length} stream=${config.streamEnabled} prompt_chars=${prompt.prompt.length}`,
 		);
 		if (prompt.contextStats) {
 			logger.debug("Prompt context chars:", prompt.contextStats);
@@ -426,7 +424,7 @@ export class ApiClient {
 								model: config.modelName,
 								prompt: prompt.prompt,
 								temperature: config.temperature,
-								maxTokens: MAX_TOKENS,
+								maxTokens: config.maxTokens,
 								stop: prompt.stopTokens,
 								timeoutMs: config.completionTimeoutMs,
 							},
@@ -448,7 +446,7 @@ export class ApiClient {
 								model: config.modelName,
 								prompt: prompt.prompt,
 								temperature: config.temperature,
-								maxTokens: MAX_TOKENS,
+								maxTokens: config.maxTokens,
 								stop: prompt.stopTokens,
 								timeoutMs: config.completionTimeoutMs,
 							},
@@ -461,7 +459,7 @@ export class ApiClient {
 							model: config.modelName,
 							prompt: prompt.prompt,
 							temperature: config.temperature,
-							maxTokens: MAX_TOKENS,
+							maxTokens: config.maxTokens,
 							stop: prompt.stopTokens,
 							timeoutMs: config.completionTimeoutMs,
 						},
@@ -566,7 +564,7 @@ export class ApiClient {
 					model: config.modelName,
 					prompt: prompt.prompt,
 					temperature: config.temperature,
-					maxTokens: MAX_TOKENS,
+					maxTokens: config.maxTokens,
 					stop: prompt.stopTokens,
 				}),
 			)
@@ -735,7 +733,7 @@ export class ApiClient {
 		const [definitionChunks, usageChunks, clipboardChunks] = await Promise.all([
 			this.buildDefinitionChunks(document, position, currentFileContextRange),
 			this.buildUsageChunks(document, position, currentFileContextRange),
-			config.includeClipboardContext
+			config.maxClipboardLines > 0
 				? this.buildClipboardChunks()
 				: Promise.resolve([]),
 		]);
@@ -909,12 +907,13 @@ export class ApiClient {
 	}
 
 	private async buildClipboardChunks(): Promise<FileChunk[]> {
-		if (!config.includeClipboard) return [];
+		const maxLines = config.maxClipboardLines;
+		if (maxLines <= 0) return [];
 		try {
 			const clipboard = (await vscode.env.clipboard.readText()).trim();
 			if (!clipboard) return [];
 
-			const lines = clipboard.split(/\r?\n/).slice(0, MAX_CLIPBOARD_LINES);
+			const lines = clipboard.split(/\r?\n/).slice(0, maxLines);
 			const content = lines.join("\n").trim();
 			if (!content) return [];
 

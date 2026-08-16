@@ -6,6 +6,7 @@ export interface EditDisplayClassification {
 		| "far-from-cursor"
 		| "before-cursor-multiline"
 		| "before-cursor-single-line"
+		| "not-on-cursor-line"
 		| "single-newline-boundary"
 		| "multiline-replacement-at-cursor"
 		| "same-line-replacement-at-cursor"
@@ -62,9 +63,19 @@ export function classifyEditDisplay(
 		};
 	}
 
-	// Edit starts after the cursor but at a different line — VS Code's inline
-	// ghost text only renders at the cursor position, so a multi-line edit
-	// elsewhere won't be visible. Route to jump-edit decorat...[truncated]
+	// The cursor line is not within the edit lines — the ghost text would
+	// render on a different line than the cursor (e.g. an edit several
+	// lines below), so it won't be visible. Route to a jump edit so the
+	// decoration hint appears at the cursor position.
+	const cursorIsOnEditLine =
+		input.cursorLine >= input.editStartLine &&
+		input.cursorLine <= input.editEndLine;
+	if (!cursorIsOnEditLine) {
+		return {
+			decision: "JUMP",
+			reason: "not-on-cursor-line",
+		};
+	}
 
 	if (
 		hasMultilineCompletion &&
@@ -73,7 +84,7 @@ export function classifyEditDisplay(
 		lineDifference <= 1
 	) {
 		return {
-			decision: "SUPPRESS",
+			decision: "INLINE",
 			reason: "single-newline-boundary",
 		};
 	}

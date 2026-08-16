@@ -2,7 +2,7 @@
 	"name": "zeta-edit-prediction",
 	"displayName": "Zeta - Edit Prediction",
 	"description": "Next Edit Autocomplete using Zeta Model",
-	"version": "1.2.8-build.22",
+	"version": "1.2.8-build.54",
 	"publisher": "Yuuzuki",
 	"author": {
 		"name": "Yuuzuki"
@@ -134,11 +134,16 @@
 				"when": "editorTextFocus && zeta.hasJumpEdit"
 			},
 			{
-				"command": "editor.action.inlineSuggest.hide",
-				"key": "escape",
-				"when": "editorTextFocus && inlineSuggestionVisible && !zeta.hasJumpEdit"
-			}
-		],
+							"command": "editor.action.inlineSuggest.hide",
+							"key": "escape",
+							"when": "editorTextFocus && inlineSuggestionVisible && !zeta.hasJumpEdit"
+						},
+						{
+							"command": "zeta.acceptInlineEditByTab",
+							"key": "tab",
+							"when": "editorTextFocus && inlineEditVisible && !zeta.hasJumpEdit"
+						}
+					],
 		"configurationDefaults": {
 			"editor.inlineSuggest.suppressSuggestions": true
 		},
@@ -160,6 +165,14 @@
 						"order": 15,
 						"scope": "window",
 						"markdownDescription": "Stream completions over SSE (Server-Sent Events). When enabled, tokens arrive incrementally but the ghost text is still rendered after the full response is received. Disable for cleaner log output with complete `prompt_eval`/`eval` statistics."
+					},
+					"zeta.temperature": {
+						"type": "number",
+						"default": 0.2,
+						"minimum": 0.0,
+						"maximum": 2.0,
+						"order": 20,
+						"markdownDescription": "Sampling temperature for the model. Lower values (0.0–0.2) are more deterministic; higher values (0.3–0.8) increase creativity. Zeta edit-prediction models are typically used at 0.0–0.1 for stable, repetitive next-edit suggestions."
 					},
 					"zeta.maxContextFiles": {
 						"type": "number",
@@ -189,11 +202,12 @@
 						"minimum": 0,
 						"markdownDescription": "Maximum number of characters from formatted recent-edit history to include in the prompt. `#zeta.maxEditHistory#` limits the number of diff records, while this limits their rendered size so large paste/format/bulk edits cannot overflow small model contexts. Set to `0` to omit recent-edit history."
 					},
-					"zeta.includeClipboardContext": {
-						"type": "boolean",
-						"default": true,
+					"zeta.maxClipboardLines": {
+						"type": "number",
+						"default": 20,
+						"minimum": 0,
 						"order": 130,
-						"markdownDescription": "Include the current clipboard text as retrieval context. Disable this to avoid clipboard changes invalidating the prompt prefix. When enabled, clipboard context is emitted after code retrieval chunks."
+						"markdownDescription": "Maximum lines of clipboard text to include as retrieval context. Set to `0` to disable clipboard context entirely. Clipboard content is emitted after code retrieval chunks."
 					},
 					"zeta.stableRetrievalOrdering": {
 						"type": "boolean",
@@ -239,7 +253,7 @@
 					},
 					"zeta.useCopilotStyleNextEditPresentation": {
 						"type": "boolean",
-						"default": false,
+						"default": true,
 						"order": 70,
 						"scope": "window",
 						"tags": [
@@ -336,8 +350,15 @@
 						"order": 20,
 						"minimum": 0,
 						"markdownDescription": "Approximate total token budget for additional non-editable current-file context around the Zeta-2.1 editable excerpt. It uses the same cheap **UTF-8 bytes / 3** estimate and whole-line boundaries. Context before the edit is placed in the FIM prefix; context after it is placed in the FIM suffix. Set to `0` to disable this surrounding context. Default `150` follows the Zeta V0318 provider profile."
-					}
-				}
+										},
+										"zeta.maxTokens": {
+											"type": "number",
+											"default": 2048,
+											"order": 25,
+											"minimum": 1,
+											"markdownDescription": "Maximum number of tokens the model is allowed to generate per request (`max_tokens` / `n_predict`). The model rewrites the entire editable window even on a single-line change, so a low value truncates the response mid-window and the extension **discards** truncated responses (finishReason=length). Default `2048` is generous enough that healthy responses never hit this cap. Reduce carefully if you observe the model generating excessively long completions."
+										}
+									}
 			}
 		]
 	},

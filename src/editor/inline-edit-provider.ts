@@ -20,6 +20,10 @@ import { toUnixPath } from "~/utils/path.ts";
 import { isFileTooLarge, utf8ByteOffsetAt } from "~/utils/text.ts";
 
 const INLINE_REQUEST_DEBOUNCE_MS = 300;
+/** Max age (ms) of an in-flight request that can still be piggybacked.
+ *  Beyond this threshold a new request is originated instead, so slow
+ *  server responses don't cascade-stall subsequent typing. */
+const PIGGYBACK_MAX_AGE_MS = 2_000;
 const MAX_FILE_CHUNK_LINES = 60;
 const BULK_CHANGE_LOOKBACK_MS = 1500;
 const BULK_CHANGE_CHAR_THRESHOLD = 200;
@@ -54,6 +58,18 @@ interface PendingProposedJump {
 	uri: string;
 	version: number;
 	targetLine: number;
+	/** Model cursor marker inside the completion, restored after the
+	 *  native inline-edit accept applies the text (item.command is NOT
+	 *  executed by VS Code for isInlineEdit=true items, so we arm the
+	 *  restore on the document-change event instead). */
+	cursorTargetOffset?: number;
+	/** Document offset of the edit start; target = startIndex + cursorTargetOffset. */
+	startIndex?: number;
+	/** Completion length — used to discard the arm when the applied
+	 *  text does not match the suggested replacement. */
+	completionLength?: number;
+	/** Document offset of the edit end (replaced range). */
+	endIndex?: number;
 }
 
 export interface AcceptedInlineSuggestion {
@@ -289,15 +305,6 @@ const SUGGEST_HIDE_COMMANDS = [
 	"hideSuggestWidget",
 ];
 
-function hideSuggestWidget(): void {
-	for (const cmd of SUGGEST_HIDE_COMMANDS) {
-		try {
-			void vscode.commands.executeCommand(cmd);
-			return;
-		} catch {}
-	}
-}
-
 /** Awaitable version of hideSuggestWidget. Returns a promise that resolves
  *  when the first successful close command completes. */
 async function hideSuggestWidgetAsync(): Promise<void> {
@@ -332,12 +339,21 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		uri: string;
 		snapshot: RequestSnapshot;
 		response: Promise<AutocompleteResult[] | null>;
+		/** Timestamp (Date.now()) when this request was started; used to
+		 *  limit piggybacking to fast requests so a slow server doesn't
+		 *  stall all subsequent typing. */
+		startedAt: number;
 	} | null = null;
 	private lastRequestTimestamp = 0;
 	/** Content snapshot from the last invocation that passed the content-change
 	 *  check. Used to avoid re-triggering on cursor-movement-only invocations
 	 *  after the file has been edited. */
 	private lastContent: string | null = null;
+	/** Set by the retrigger commands (zeta.retriggerCompletion /
+	 *  zeta.triggerCompletionAtCursor) to force a fresh request even when the
+	 *  content is unchanged since the last invocation. Cleared on the first
+	 *  provider entry that consumes it. */
+	forceTriggerRequested = false;
 	private editableContextWindow: EditableContextWindow | null = null;
 	private pendingProposedJump: PendingProposedJump | null = null;
 	/** Cached diagnostics for the current document, refreshed on
@@ -422,14 +438,22 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		// Normal automatic suggestions require content to have changed since
 		// the last invocation that passed the content-change check. This
 		// prevents cursor-movement-only invocations from resetting the debounce
-		// and silently cancelling the in-flight request.
+		// and silently cancelling the in-flight request. Manual invocations
+		// (retrigger commands, Ctrl+Shift+F12 / Ctrl+Shift+Alt+Enter) always
+		// proceed regardless of content changes.
+		const isManualInvoke =
+			context.triggerKind === vscode.InlineCompletionTriggerKind.Invoke ||
+			this.forceTriggerRequested;
 		if (
+			this.forceTriggerRequested !== true &&
 			this.lastContent !== null &&
 			currentContent === this.lastContent &&
-			context.triggerKind !== vscode.InlineCompletionTriggerKind.Invoke
+			!isManualInvoke
 		) {
 			return undefined;
 		}
+		const wasForceTriggered = this.forceTriggerRequested;
+		this.forceTriggerRequested = false;
 		this.lastContent = currentContent;
 
 		// Only update latestRequestId AFTER passing all early-return checks.
@@ -463,7 +487,14 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 			let input;
 			let controller;
 			try {
-				this.cancelInFlightRequest("superseded by new request");
+				// When force-triggered (manual retrigger), do NOT cancel the
+				// in-flight request.  Aborting the previous HTTP connection
+				// mid-flight can confuse the server (llama.cpp) and delay
+				// the new request's response.  The old response will be
+				// discarded by isLatestRequest anyway.
+				if (!wasForceTriggered) {
+					this.cancelInFlightRequest("superseded by new request");
+				}
 				this.rememberEditableContextWindow(document, requestSnapshot);
 				controller = new AbortController();
 				logger.trace(`setupOriginate: before buildInput for req=${requestId}`);
@@ -484,6 +515,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 				uri,
 				snapshot: requestSnapshot,
 				response: promise,
+				startedAt: Date.now(),
 			};
 			this.inFlightRequest = inFlight;
 			promise.finally(() => {
@@ -618,9 +650,10 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 					continue;
 				}
 
-				if (this.isNoOpSuggestion(document, normalizedResult)) {
-					continue;
-				}
+				// Temporarily disabled to diagnose "third completion not showing"
+				// if (this.isNoOpSuggestion(document, normalizedResult)) {
+				// 	continue;
+				// }
 
 				const classification = this.jumpEditManager.classifyEditDisplay(
 					document,
@@ -784,6 +817,9 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		if (!inFlight) return null;
 		if (inFlight.uri !== uri) return null;
 		if (inFlight.controller.signal.aborted) return null;
+		// Don't piggyback on slow requests — the user is typing and deserves
+		// a fresh prediction, not a stale response that may never arrive.
+		if (Date.now() - inFlight.startedAt > PIGGYBACK_MAX_AGE_MS) return null;
 		const inserted = this.extractInsertedTextAtCursor(
 			inFlight.snapshot.content,
 			newSnapshot.content,
@@ -923,7 +959,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		// completion and can cause the request to be cancelled by a
 		// subsequent keystroke.
 		if (config.useCopilotStyleNextEditPresentation) {
-			void hideSuggestWidget();
+			void hideSuggestWidgetAsync();
 		}
 
 		const cursorOffset = document.offsetAt(position);
@@ -947,10 +983,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 			options.useProposedInlineEditPresentation &&
 			config.useCopilotStyleNextEditPresentation;
 
-		if (
-			result.startIndex < cursorOffset &&
-			!useProposedInlineEditPresentation
-		) {
+		if (result.startIndex < cursorOffset && !useProposedInlineEditPresentation) {
 			logger.debug(
 				"Edit before cursor cannot be shown as ghost text; falling back to jump edit",
 				{
@@ -992,10 +1025,19 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 				uri: document.uri.toString(),
 				version: document.version,
 				targetLine: startPosition.line,
+				...(result.cursorTargetOffset !== undefined
+					? {
+							cursorTargetOffset: result.cursorTargetOffset,
+							startIndex: result.startIndex,
+							endIndex: result.endIndex,
+							completionLength: result.completion.length,
+						}
+					: {}),
 			};
 			logger.debug("Watching proposed jump target", {
 				targetLine: startPosition.line,
 				originLine: position.line,
+				cursorTargetOffset: result.cursorTargetOffset,
 			});
 		} else {
 			this.pendingProposedJump = null;
@@ -1012,6 +1054,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		if (useProposedInlineEditPresentation) {
 			const proposedOptions: Parameters<typeof markAsProposedInlineEdit>[1] = {
 				correlationId: result.id,
+				showRange: editRange,
 			};
 			if (options.displayLocation) {
 				proposedOptions.displayLocation = options.displayLocation;
@@ -1074,6 +1117,70 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 			anchorLine: snapshot.position.line,
 			version: snapshot.version,
 		});
+	}
+
+	/**
+	 * VS Code's native proposed inline edit (isInlineEdit=true) does NOT
+	 * execute the item's command on acceptance, so cursor restoration
+	 * cannot rely on handleInlineAccept.  Instead, watch the document
+	 * change that the accept applies: when the version advances past the
+	 * suggested jump's armed version while the jump target line matches
+	 * the edit start, place the model's cursor marker after a tick.
+	 */
+	handleDocumentChangeForCursorRestore(event: vscode.TextDocumentChangeEvent): void {
+		const jump = this.pendingProposedJump;
+		if (!jump) return;
+		if (jump.cursorTargetOffset === undefined) return;
+		if (jump.startIndex === undefined) return;
+		const doc = event.document;
+		if (doc.uri.toString() !== jump.uri) return;
+		// The accept applies exactly one change that advances the version
+		// by one past what we saw when the suggestion was built.
+		if (doc.version !== jump.version + 1) return;
+		// Merge all contentChanges; native accept may split a large edit
+		// into multiple hunks (e.g. per line).  The union must exactly
+		// cover the armed edit range.
+		const startPos = doc.positionAt(jump.startIndex);
+		const endPos = jump.endIndex !== undefined ? doc.positionAt(jump.endIndex) : undefined;
+		if (endPos === undefined) return;
+		let unionStart = event.contentChanges[0]?.range.start;
+		let unionEnd = event.contentChanges[0]?.range.end;
+		for (const cc of event.contentChanges) {
+			if (cc.range.start.isBefore(unionStart)) unionStart = cc.range.start;
+			if (unionEnd.isBefore(cc.range.end)) unionEnd = cc.range.end;
+		}
+		if (!unionStart || !unionEnd) return;
+		const matchesEditRange =
+			unionStart.isEqual(startPos) && unionEnd.isEqual(endPos);
+		if (!matchesEditRange) return;
+
+		// Disarm first so a second change event cannot re-fire.
+		this.pendingProposedJump = null;
+		logger.debug("Native inline edit accepted; restoring model cursor", {
+			startIndex: jump.startIndex,
+			cursorTargetOffset: jump.cursorTargetOffset,
+			newVersion: doc.version,
+		});
+		setTimeout(() => {
+			const editor = vscode.window.activeTextEditor;
+			if (!editor || editor.document.uri.toString() !== jump.uri) {
+				return;
+			}
+			const targetOffset = Math.min(
+				jump.startIndex! + jump.cursorTargetOffset!,
+				editor.document.getText().length,
+			);
+			const target = editor.document.positionAt(Math.max(0, targetOffset));
+			editor.selection = new vscode.Selection(target, target);
+			editor.revealRange(
+				new vscode.Range(target, target),
+				vscode.TextEditorRevealType.InCenterIfOutsideViewport,
+			);
+			logger.debug("Cursor restored after native inline edit accept", {
+				line: target.line + 1,
+				character: target.character,
+			});
+		}, 0);
 	}
 
 	private maybeRetriggerAfterProposedJump(
@@ -1313,7 +1420,14 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 			this.lastInlineEdit = null;
 		}
 		if (!acceptedSuggestion) return;
-		this.placeCursorAfterPlainTextAccept(acceptedSuggestion);
+		// VS Code's proposed inline edit (isInlineEdit=true) accept path may
+		// set its own default cursor position (edit range start / end) after
+		// the item.command runs, overwriting our restore.  Deferring the
+		// model-cursor placement to the next macrotask lets VS Code finish
+		// its own post-accept cursor handling first so ours is not lost.
+		setTimeout(() => {
+			this.placeCursorAfterPlainTextAccept(acceptedSuggestion);
+		}, 0);
 		this.adjustQueuedSuggestionsAfterAccept(acceptedSuggestion);
 		if (this.queuedSuggestions?.suggestions.length) {
 			this.shouldConsumeQueuedSuggestion = true;
@@ -1357,6 +1471,53 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 			line: target.line + 1,
 			character: target.character,
 		});
+	}
+
+	/**
+	 * Called when the user presses Tab while a proposed inline edit is
+	 * visible (inlineEditVisible context key).  Applies the edit manually
+	 * so that Tab works even when VS Code's own Tab→inlineEdit.accept
+	 * binding is missing (custom builds) or overridden by indent logic.
+	 */
+	acceptCurrentInlineEdit(): void {
+		const inline = this.lastInlineEdit;
+		if (!inline) return;
+		const { suggestion } = inline;
+		const editor = vscode.window.activeTextEditor;
+		if (
+			!editor ||
+			editor.document.uri.toString() !== suggestion.uri
+		) {
+			return;
+		}
+		const startPos = editor.document.positionAt(suggestion.startIndex);
+		const endPos = editor.document.positionAt(suggestion.endIndex);
+		void editor.edit(
+			(builder) => {
+				builder.replace(
+					new vscode.Range(startPos, endPos),
+					suggestion.completion,
+				);
+			},
+			{ undoStopBefore: true, undoStopAfter: false },
+		);
+		// Restore cursor to the model's predicted position
+		if (suggestion.cursorTargetOffset !== undefined) {
+			const targetOffset = Math.min(
+				suggestion.startIndex + suggestion.cursorTargetOffset,
+				editor.document.getText().length,
+			);
+			const target = editor.document.positionAt(
+				Math.max(0, targetOffset),
+			);
+			editor.selection = new vscode.Selection(target, target);
+			editor.revealRange(
+				new vscode.Range(target, target),
+				vscode.TextEditorRevealType.InCenterIfOutsideViewport,
+			);
+		}
+		// Clear the inline edit state so the UI dismisses
+		this.clearInlineEdit("accepted via Tab");
 	}
 
 	private clearInlineEdit(
@@ -1417,7 +1578,10 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 			if (!next) break;
 			const normalized = this.normalizeInlineResult(document, position, next);
 			if (!normalized) continue;
-			if (this.isNoOpSuggestion(document, normalized)) continue;
+			// Temporarily disabled to diagnose "third completion not showing"
+			// (mirrors the main path — isNoOpSuggestion can misjudge valid
+			// suggestions as no-op and skip rendering them).
+			// if (this.isNoOpSuggestion(document, normalized)) continue;
 
 			const classification = this.jumpEditManager.classifyEditDisplay(
 				document,
@@ -1931,7 +2095,10 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 			out.cursorTargetOffset !== undefined &&
 			out.cursorTargetOffset > trimmedCompletion.length
 		) {
-			delete out.cursorTargetOffset;
+			// Marker fell inside the overlapped suffix that was trimmed;
+			// clamp it to the trimming boundary so the cursor lands at
+			// the end of the valid text rather than being dropped.
+			out.cursorTargetOffset = trimmedCompletion.length;
 		}
 		return out;
 	}
@@ -1948,10 +2115,14 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		if (activeEditor.document.version !== snapshot.version) return true;
 		if (activeEditor.document.getText() !== snapshot.content) return true;
 		const activePosition = activeEditor.selection.active;
-		return (
-			activePosition.line !== snapshot.position.line ||
-			activePosition.character !== snapshot.position.character
-		);
+		const lineDiff = Math.abs(activePosition.line - snapshot.position.line);
+		const charDiff = Math.abs(activePosition.character - snapshot.position.character);
+		// Allow small cursor movements (e.g. scrolling, clicking nearby)
+		// without discarding the pending response.  A move beyond half a
+		// viewport likely means the user switched context.
+		const MAX_CURSOR_MOVE_LINES = 20;
+		const MAX_CURSOR_MOVE_CHARS = 20;
+		return lineDiff > MAX_CURSOR_MOVE_LINES || charDiff > MAX_CURSOR_MOVE_CHARS;
 	}
 
 	private trimNewlines(text: string): string {

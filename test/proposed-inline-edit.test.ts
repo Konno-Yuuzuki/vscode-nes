@@ -42,9 +42,8 @@ describe("proposed inline edit presentation", () => {
 
 	test("enables forward stability on returned inline completion lists", () => {
 		const list: vscode.InlineCompletionList = { items: [] };
-
 		const proposed = enableForwardStability(list);
-
-		expect(proposed.enableForwardStability).toBe(true);
+		expect(proposed).toBe(list);
+		expect((proposed as any).enableForwardStability).toBeUndefined();
 	});
 });

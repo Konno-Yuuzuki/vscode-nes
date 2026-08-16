@@ -36,6 +36,65 @@ latency — is removed.
   (`Developer: Set Log Level… → Zeta`) for full request/response
   visibility.
 
+## Edit Display Classification
+
+The extension classifies every completion into one of three display modes
+based on the cursor position relative to the edit range:
+
+| Mode | Visual | Accept | Best for |
+|------|--------|--------|----------|
+| **INLINE** | Ghost text at the edit range start | ++tab++ (accept all) | Edits visible at the cursor position |
+| **JUMP** | Decoration `→ Edit at line N` at the cursor | ++tab++ (accept all), ++ctrl+enter++ (single line) | Edits on a different line that the user must navigate to |
+| **SUPPRESS** | Nothing shown | — | Transient boundary states (previously used for newline boundaries) |
+
+### Classification rules
+
+The decision is made by `classifyEditDisplay()` in
+`src/editor/edit-display-classifier.ts`. The rules are evaluated in order:
+
+```
+┌─ Received completion ─────────────────────────────┐
+│                                                    │
+│ ① Far from cursor (3+ lines away)  ───→ JUMP       │
+│ ② Edit starts before cursor offset  ───→ JUMP       │
+│ ③ Cursor line not in edit lines     ───→ JUMP       │
+│ ④ Cursor at edit start, multiline,                 │
+│   on newline boundary ────────────────→ INLINE      │
+│ ⑤ Cursor at edit start, multiline                  │
+│   replacement ────────────────────────→ JUMP        │
+│ ⑥ Cursor at edit start, same-line                  │
+│   non-extending replacement ──────────→ JUMP        │
+│ ⑦ Everything else (safe inline) ─────→ INLINE      │
+└────────────────────────────────────────────────────┘
+```
+
+### Scenario reference
+
+| # | Cursor vs edit range | Example | Mode | Reason |
+|---|---------------------|---------|------|--------|
+| 1 | **Far from cursor** (`cursorLine < editStartLine - 2` or `cursorLine > editEndLine + 2`) | Cursor on line 20, edit on lines 5–6 | JUMP | `far-from-cursor` |
+| 2 | **Edit starts before cursor, multiline** (`startIndex < cursorOffset` + `\n` in completion) | Edit range 132–140, cursor at 137 | JUMP | `before-cursor-multiline` |
+| 3 | **Edit starts before cursor, single-line** (`startIndex < cursorOffset`) | Cursor at col 25, edit replaces cols 5–20 on same line | JUMP | `before-cursor-single-line` |
+| 4 | **Cursor line not in edit lines** (`cursorLine ∉ [editStartLine, editEndLine]`) | Cursor on line 5, edit on line 6 | JUMP | `not-on-cursor-line` |
+| 5 | **At cursor, multiline, newline boundary** (`startIndex === cursorOffset` + `\n` + cursor after `\n`) | Pressed Enter at end of line, model suggests function body | INLINE | `single-newline-boundary` |
+| 6 | **At cursor, multiline replacement** (`startIndex === cursorOffset` + `endIndex > startIndex` + `editEndLine > editStartLine`) | Cursor at start of a function, model replaces entire body | JUMP | `multiline-replacement-at-cursor` |
+| 7 | **At cursor, same-line non-extending replacement** (`startIndex === cursorOffset` + replacement doesn't extend existing text) | Cursor after `"broken"`, completion replaces with `"*"` | JUMP | `same-line-replacement-at-cursor` |
+| 8 | **At cursor, safe same-line extension** (fallthrough) | Cursor at end of `high`, completion extends to `highWatermark` | INLINE | `inline-safe` |
+
+### Why JUMP for off-line edits?
+
+VS Code's `InlineCompletionItem` (non-proposed API) renders ghost text at the
+**start of the edit range**. If the start is on a different line than the cursor,
+the ghost text is not visible to the user. The JUMP mode falls back to a
+decoration at the cursor position (`→ Edit at line N`) so the user always knows
+a suggestion exists, and can press ++tab++ to accept or ++ctrl+enter++ to accept
+a single line.
+
+When the `zeta.useCopilotStyleNextEditPresentation` setting is enabled (default: `true`),
+JUMP completions render as a **proposed inline edit** with a
+clickable jump affordance — the user sees the actual content at the edit
+location and can navigate to it.
+
 ## Settings
 
 | Key | Default | Purpose |
@@ -48,7 +107,7 @@ latency — is removed.
 | `zeta.maxContextFiles` | `5` | Related excerpt cap; Zeta prioritizes LSP retrieval, then visible/recent buffers |
 | `zeta.outlineSymbols` | `0` | Optional nearby LSP symbols plus the active symbol path for every model. Includes methods, fields, enum members, and globals when provided; asynchronous and separate from `maxContextFiles`, a positive value opts in |
 | `zeta.maxRecentChangesChars` | `12000` | Character budget for formatted recent-edit history; `0` disables history |
-| `zeta.includeClipboardContext` | `true` | Include clipboard text as retrieval context; it is emitted last in retrieval |
+| `zeta.maxClipboardLines` | `20` | Max lines of clipboard text included as retrieval context; `0` disables clipboard context |
 | `zeta.stableRetrievalOrdering` | `false` | Sort retrieval chunks deterministically to improve prefix-cache reuse |
 | `zeta.reuseIdenticalPromptResults` | `false` | Reuse recent temperature-0 results for byte-identical prompts |
 | `zeta.identicalPromptCacheTtlMs` | `5000` | TTL for identical-prompt result reuse |

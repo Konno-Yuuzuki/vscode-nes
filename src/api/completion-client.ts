@@ -1,6 +1,8 @@
 import * as http from "node:http";
 import * as https from "node:https";
 
+import { logger } from "~/core/logger.ts";
+
 export interface CompletionRequest {
 	model: string;
 	prompt: string;
@@ -211,6 +213,9 @@ export class CompletionClient {
 			});
 
 			const onTimeout = () => {
+				logger.warn(
+					`Completion request timed out after ${timeoutMs}ms, destroying connection`,
+				);
 				finish(() => {
 					httpReq.destroy();
 					reject(
@@ -236,6 +241,7 @@ export class CompletionClient {
 
 			httpReq.on("error", onError);
 			httpReq.on("timeout", onTimeout);
+			httpReq.setTimeout(timeoutMs);
 			deadlineTimer = setTimeout(onTimeout, timeoutMs);
 			if (signal) {
 				if (signal.aborted) {

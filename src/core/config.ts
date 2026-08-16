@@ -9,6 +9,7 @@ import {
 	DEFAULT_MAX_CONTEXT_FILES,
 	DEFAULT_MAX_EDIT_HISTORY,
 	DEFAULT_MAX_RECENT_CHANGES_CHARS,
+	DEFAULT_MAX_TOKENS,
 	DEFAULT_OUTLINE_SYMBOLS,
 	DEFAULT_RETRIGGER_ON_CONTEXT_EXIT,
 	DEFAULT_RULES_MAX_CHARS,
@@ -39,12 +40,13 @@ export class SweepConfig {
 	}
 
 	/**
-	 * Include clipboard content as context in the prompt. Disabled by default
-	 * because clipboard text (error messages, logs, terminal output) often
-	 * confuses the model more than it helps.
+	 * Maximum lines of clipboard text to include as retrieval context.
+	 * `0` disables clipboard context entirely. Clipboard text (error
+	 * messages, logs, terminal output) can confuse the model, so the
+	 * default line cap keeps it bounded.
 	 */
-	get includeClipboard(): boolean {
-		return this.config.get<boolean>("includeClipboard", false);
+	get maxClipboardLines(): number {
+		return this.config.get<number>("maxClipboardLines", 20);
 	}
 
 	/**
@@ -52,7 +54,7 @@ export class SweepConfig {
 	 * deterministic; higher values (0.3–0.8) increase creativity.
 	 */
 	get temperature(): number {
-		return this.config.get<number>("temperature", 0.0);
+		return this.config.get<number>("temperature", 0.2);
 	}
 
 	get maxContextFiles(): number {
@@ -75,10 +77,6 @@ export class SweepConfig {
 			"maxRecentChangesChars",
 			DEFAULT_MAX_RECENT_CHANGES_CHARS,
 		);
-	}
-
-	get includeClipboardContext(): boolean {
-		return this.config.get<boolean>("includeClipboardContext", true);
 	}
 
 	get stableRetrievalOrdering(): boolean {
@@ -107,7 +105,7 @@ export class SweepConfig {
 	get useCopilotStyleNextEditPresentation(): boolean {
 		return this.config.get<boolean>(
 			"useCopilotStyleNextEditPresentation",
-			false,
+			true,
 		);
 	}
 
@@ -152,13 +150,20 @@ export class SweepConfig {
 	}
 
 	get zetaContextTokens(): number {
-		return this.nonNegativeInteger(
-			"zetaContextTokens",
-			DEFAULT_ZETA_CONTEXT_TOKENS,
-		);
-	}
+			return this.nonNegativeInteger(
+				"zetaContextTokens",
+				DEFAULT_ZETA_CONTEXT_TOKENS,
+			);
+		}
 
-	get rulesMaxChars(): number {
+		get maxTokens(): number {
+			return Math.max(
+				1,
+				this.nonNegativeInteger("maxTokens", DEFAULT_MAX_TOKENS),
+			);
+		}
+
+		get rulesMaxChars(): number {
 		return this.config.get<number>("rulesMaxChars", DEFAULT_RULES_MAX_CHARS);
 	}
 

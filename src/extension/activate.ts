@@ -30,6 +30,100 @@ let copilotStylePresentationWarningShown = false;
 
 const COPILOT_STYLE_PROPOSED_API_EXTENSION_ID = "Yuuzuki.zeta-edit-prediction";
 
+/** Candidate argv.json locations in priority order: --user-data-dir, then the
+ *  default ~/.vscode/argv.json.  VS Code reads `enable-proposed-api` from the
+ *  argv.json of the active user-data-dir, which does NOT go through the
+ *  compiled-in product.json white-list (that embedded list is what actually
+ *  gates proposed API on custom builds). */
+function getArgvJsonCandidates(): string[] {
+	const out: string[] = [];
+	try {
+		const argIndex = process.argv.indexOf("--user-data-dir");
+		if (argIndex !== -1 && process.argv[argIndex + 1]) {
+			out.push(
+				require("node:path").join(
+					process.argv[argIndex + 1],
+					"argv.json",
+				),
+			);
+		}
+	} catch {}
+	out.push(
+		require("node:path").join(
+			require("node:os").homedir(),
+			".vscode",
+			"argv.json",
+		),
+	);
+	return out;
+}
+
+function argvJsonHasProposedApiConsent(): boolean {
+	for (const file of getArgvJsonCandidates()) {
+		try {
+			if (!require("node:fs").existsSync(file)) continue;
+			const content = require("node:fs").readFileSync(file, "utf8");
+			const m = content.match(/"enable-proposed-api"\s*:\s*\[([^\]]*)\]/);
+			if (
+				m &&
+				m[1].includes(`"${COPILOT_STYLE_PROPOSED_API_EXTENSION_ID}"`)
+			) {
+				return true;
+			}
+		} catch {}
+	}
+	return false;
+}
+
+function processHasProposedApiFlag(): boolean {
+	const flag = `--enable-proposed-api=${COPILOT_STYLE_PROPOSED_API_EXTENSION_ID}`;
+	return (
+		process.argv.includes(flag) ||
+		process.argv.some(
+			(a, i) =>
+				a === "--enable-proposed-api" &&
+				process.argv[i + 1] === COPILOT_STYLE_PROPOSED_API_EXTENSION_ID,
+		)
+	);
+}
+
+/** Appends our extension id to argv.json's `enable-proposed-api` array,
+ *  preserving JSONC comments/trailing commas. Returns true if the consent is
+ *  present afterwards. */
+function writeArgvJsonConsent(): boolean {
+	for (const file of getArgvJsonCandidates()) {
+		try {
+			const fs = require("node:fs");
+			const content = fs.existsSync(file)
+				? fs.readFileSync(file, "utf8")
+				: "{\n}\n";
+			const entry = `"${COPILOT_STYLE_PROPOSED_API_EXTENSION_ID}"`;
+			const m = content.match(/"enable-proposed-api"\s*:\s*\[([^\]]*)\]/);
+			let next: string;
+			if (m) {
+				if (m[1].includes(entry)) return true;
+				const ids = m[1]
+					.split(",")
+					.map((s) => s.trim())
+					.filter(Boolean);
+				ids.push(entry);
+				next = content.replace(m[0], m[0].replace(m[1], ids.join(", ")));
+			} else {
+				const idx = content.indexOf("{");
+				const tail = content.slice(idx + 1);
+				const indent = tail.startsWith("\n	") ? "	" : "";
+				next =
+					content.slice(0, idx + 1) +
+					`\n${indent}"enable-proposed-api": [${entry}],` +
+					tail;
+			}
+			fs.writeFileSync(file, next, "utf8");
+			return true;
+		} catch {}
+	}
+	return false;
+}
+
 function maybeWarnAboutCopilotStylePresentation(): void {
 	if (
 		!config.useCopilotStyleNextEditPresentation ||
@@ -42,33 +136,38 @@ function maybeWarnAboutCopilotStylePresentation(): void {
 	if (isProposedApiEnabled()) {
 		return;
 	}
-	// Show a modal dialog with Enable/Never/Later options, matching the
-	// original ucp-style flow. The user picks "Enable" → UAC prompt →
-	// product.json updated → restart prompt.
-	void vscode.window
-		.showWarningMessage(
-			"Zeta uses the proposed inlineCompletionsAdditions API to display Copilot-style inline edits. " +
-				"Enabling it modifies product.json in the current VS Code installation and requires administrator permission. " +
-				"Without it, Tab-accepted jump edits still work, but the inline edit presentation is not displayed.",
-			{ modal: true },
-			{ title: "Enable", isCloseAffordance: false },
-			{ title: "Never Remind Again", isCloseAffordance: false },
-			{ title: "Later", isCloseAffordance: true },
-		)
-		.then((selection) => {
-			if (!selection) return;
-			if (selection.title === "Enable") {
-				void enableProposedApi();
-			} else if (selection.title === "Never Remind Again") {
-				// Dismissed permanently — reset the flag so the warning stays
-				// hidden even if the user later enables the setting again.
-				copilotStylePresentationWarningShown = true;
-			}
-			// "Later" — just dismiss; the warning will show again on next restart.
-		});
+	// Auto-enable via argv.json (user-level, no admin rights needed); the
+	// value takes effect after a full restart of VS Code.
+	if (writeArgvJsonConsent()) {
+		void vscode.window
+			.showInformationMessage(
+				"Zeta 需要 VS Code Proposed API 才能显示 Copilot 风格的多行编辑预览。" +
+					"已自动写入授权配置(argv.json)，重启 VS Code 后生效。",
+				"立即重启",
+				"稍后",
+			)
+			.then((choice) => {
+				if (choice === "立即重启") {
+					void vscode.commands.executeCommand(
+						"workbench.action.reloadWindow",
+					);
+				}
+			});
+	} else {
+		void vscode.window.showWarningMessage(
+			`Zeta 使用 Proposed API 显示多行编辑预览。请以 --enable-proposed-api=${COPILOT_STYLE_PROPOSED_API_EXTENSION_ID} 启动 VS Code，` +
+				`或在 argv.json 的 "enable-proposed-api" 中添加 "${COPILOT_STYLE_PROPOSED_API_EXTENSION_ID}" 后重启。`,
+		);
+	}
 }
 
 export function isProposedApiEnabled(): boolean {
+	if (processHasProposedApiFlag()) return true;
+	if (argvJsonHasProposedApiConsent()) return true;
+	return productJsonHasProposedApiConsent();
+}
+
+function productJsonHasProposedApiConsent(): boolean {
 	try {
 		const productPath = findProductJson();
 		if (!productPath) return false;
@@ -114,7 +213,7 @@ export function findProductJson(): string | null {
 				if (require("node:fs").existsSync(candidate)) {
 					knownPaths.push(candidate);
 				}
-			}
+		}
 			// Also check grandparent (one level up)
 			for (const entry of require("node:fs").readdirSync(grandparent)) {
 				const candidate = require("node:path").join(
@@ -127,7 +226,7 @@ export function findProductJson(): string | null {
 				if (require("node:fs").existsSync(candidate)) {
 					knownPaths.push(candidate);
 				}
-			}
+		}
 		} catch {
 			// readdir may fail for permission reasons; skip scan
 		}
@@ -146,71 +245,23 @@ async function enableProposedApi(): Promise<void> {
 		return;
 	}
 
-	const productPath = findProductJson();
-	if (!productPath) {
-		void vscode.window.showErrorMessage(
-			"Cannot find VS Code product.json. Use --enable-proposed-api=Yuuzuki.zeta-edit-prediction to start VS Code.",
+	if (writeArgvJsonConsent()) {
+		const choice = await vscode.window.showInformationMessage(
+			"已写入 Proposed API 授权(argv.json)。重启 VS Code 后生效。",
+			"立即重启",
 		);
+		if (choice === "立即重启") {
+			void vscode.commands.executeCommand(
+				"workbench.action.reloadWindow",
+			);
+		}
 		return;
 	}
 
-	const selection = await vscode.window.showWarningMessage(
-		"Enable Zeta Copilot-style next-edit presentation?",
-		{
-			modal: true,
-			detail:
-				"This will modify product.json in the VS Code installation directory and requires administrator permission.",
-		},
-		"Enable",
-		"Cancel",
+	void vscode.window.showErrorMessage(
+		`无法自动写入 argv.json。请手动：在 user-data-dir 的 argv.json 中为 "enable-proposed-api" 添加 "${COPILOT_STYLE_PROPOSED_API_EXTENSION_ID}"，` +
+			`或使用 --enable-proposed-api=${COPILOT_STYLE_PROPOSED_API_EXTENSION_ID} 启动 VS Code。`,
 	);
-	if (selection !== "Enable") return;
-
-	// Use PowerShell to modify product.json with admin rights
-	const script = `
-$p = '${productPath.replace(/\\/g, "\\\\")}'
-$c = Get-Content $p -Raw -Encoding UTF8
-$d = $c | ConvertFrom-Json
-if (-not $d.extensionEnabledApiProposals) {
-  $d | Add-Member -NotePropertyName "extensionEnabledApiProposals" -NotePropertyValue @{} -Force
-}
-if (-not $d.extensionEnabledApiProposals."Yuuzuki.zeta-edit-prediction") {
-  $d.extensionEnabledApiProposals | Add-Member -NotePropertyName "Yuuzuki.zeta-edit-prediction" -NotePropertyValue @("inlineCompletionsAdditions") -Force
-  $n = $d | ConvertTo-Json -Depth 10
-  # Write UTF-8 without BOM
-  [System.IO.File]::WriteAllText($p, $n, [System.Text.UTF8Encoding]::new($false))
-  Write-Host "OK"
-} else {
-  Write-Host "ALREADY"
-}
-`;
-	const b64 = Buffer.from(script, "utf16le").toString("base64");
-	const proc = require("node:child_process").spawn(
-		"powershell.exe",
-		["-NoProfile", "-NonInteractive", "-EncodedCommand", b64],
-		{ windowsHide: true },
-	);
-
-	await new Promise<void>((resolve) => {
-		proc.on("exit", () => resolve());
-		proc.on("error", () => resolve());
-		setTimeout(() => resolve(), 30000);
-	});
-
-	if (isProposedApiEnabled()) {
-		void vscode.window.showInformationMessage(
-			"Zeta proposed API enabled. Please restart VS Code completely for the change to take effect.",
-		);
-		// Show restart prompt
-		await vscode.window.showInformationMessage(
-			"Restart VS Code now to apply the change?",
-			"Restart Later",
-		);
-	} else {
-		void vscode.window.showErrorMessage(
-			"Failed to enable proposed API. Use --enable-proposed-api=Yuuzuki.zeta-edit-prediction to start VS Code.",
-		);
-	}
 }
 
 export function activate(context: vscode.ExtensionContext) {
@@ -273,7 +324,39 @@ export function activate(context: vscode.ExtensionContext) {
 		() => enableProposedApi(),
 	);
 
-	statusBar = new SweepStatusBar(context, apiClient);
+	const triggerAtCursorCommand = vscode.commands.registerCommand(
+		"zeta.triggerCompletionAtCursor",
+		() => {
+			logger.info("Manual trigger at cursor requested");
+			provider.forceTriggerRequested = true;
+			void vscode.commands
+				.executeCommand("editor.action.inlineSuggest.hide")
+				.then(() =>
+					vscode.commands.executeCommand(
+						"editor.action.inlineSuggest.trigger",
+					),
+				);
+		},
+			);
+
+			const acceptInlineEditByTabCommand = vscode.commands.registerCommand(
+				"zeta.acceptInlineEditByTab",
+				() => {
+					// Try VS Code's native inline edit accept command first.
+					// If it's not available (custom build), fall back to manual.
+					void vscode.commands
+						.executeCommand("editor.action.inlineEdit.accept")
+						.then(
+							() => {},
+							() => {
+								// Fallback: apply the edit manually
+								provider.acceptCurrentInlineEdit();
+							},
+						);
+				},
+			);
+
+			statusBar = new SweepStatusBar(context, apiClient);
 	const statusBarCommands = registerStatusBarCommands(
 		context,
 		completionServer,
@@ -281,6 +364,7 @@ export function activate(context: vscode.ExtensionContext) {
 	const rulesDiagnostics = new RulesDiagnostics();
 
 	const changeListener = vscode.workspace.onDidChangeTextDocument((event) => {
+		provider.handleDocumentChangeForCursorRestore(event);
 		if (event.document === vscode.window.activeTextEditor?.document) {
 			tracker.trackChange(event);
 		}
@@ -302,14 +386,14 @@ export function activate(context: vscode.ExtensionContext) {
 				} else {
 					copilotStylePresentationWarningShown = false;
 				}
-			}
+		}
 
 			if (event.affectsConfiguration("workbench.colorTheme")) {
 				// The colorTheme setting can update slightly after the active theme event.
 				setTimeout(() => {
 					refreshTheme();
 				}, 0);
-			}
+		}
 		},
 	);
 
@@ -326,7 +410,7 @@ export function activate(context: vscode.ExtensionContext) {
 				handleCursorMove(editor);
 			} else {
 				tracker.setActiveFile(null);
-			}
+		}
 		},
 	);
 
@@ -343,7 +427,7 @@ export function activate(context: vscode.ExtensionContext) {
 					activeDocument.uri.toString()
 			) {
 				return;
-			}
+		}
 
 			tracker.trackSelectionChange(event.textEditor.document, event.selections);
 			for (const selection of event.selections) {
@@ -351,7 +435,7 @@ export function activate(context: vscode.ExtensionContext) {
 					event.textEditor.document,
 					selection.active,
 				);
-			}
+		}
 			handleCursorMove(event.textEditor);
 		},
 	);

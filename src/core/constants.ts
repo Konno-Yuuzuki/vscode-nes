@@ -47,7 +47,7 @@ export const MODEL_NAME = "zeta-edit-prediction";
 // a corrupt line-diff (window tail no longer matches), so we just reject
 // finish_reason=length completions in sweep-completion. Keep num_predict
 // high enough that healthy responses never hit this cap.
-export const MAX_TOKENS = 2048;
+export const DEFAULT_MAX_TOKENS = 2048;
 export const TEMPERATURE = 0.0;
 
 // File size guards (match JetBrains defaults)

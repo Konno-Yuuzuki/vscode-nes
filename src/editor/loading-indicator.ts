@@ -90,8 +90,10 @@ export class LoadingIndicatorDecoration implements vscode.Disposable {
 		const editor = vscode.window.activeTextEditor;
 		if (!editor) return;
 
-		const cursorLine = editor.selection.active.line;
-		const range = new vscode.Range(cursorLine, 0, cursorLine, 0);
+		// Place the range at the end of the cursor line so `after` content
+		// renders at the line's trailing edge, not at column 0.
+		const endPos = editor.document.lineAt(editor.selection.active.line).range.end;
+		const range = new vscode.Range(endPos, endPos);
 
 		for (let i = 0; i < this.frameDecorations.length; i++) {
 			editor.setDecorations(

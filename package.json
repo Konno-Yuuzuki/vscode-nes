@@ -134,23 +134,69 @@
 				"when": "editorTextFocus && zeta.hasJumpEdit"
 			},
 			{
-							"command": "editor.action.inlineSuggest.hide",
-							"key": "escape",
-							"when": "editorTextFocus && inlineSuggestionVisible && !zeta.hasJumpEdit"
-						},
-						{
-							"command": "zeta.acceptInlineEditByTab",
-							"key": "tab",
-							"when": "editorTextFocus && inlineEditVisible && !zeta.hasJumpEdit"
-						}
-					],
+				"command": "editor.action.inlineSuggest.hide",
+				"key": "escape",
+				"when": "editorTextFocus && inlineSuggestionVisible && !zeta.hasJumpEdit"
+			},
+			{
+				"command": "zeta.acceptInlineEditByTab",
+				"key": "tab",
+				"when": "editorTextFocus && inlineEditVisible && !zeta.hasJumpEdit"
+			}
+		],
 		"configurationDefaults": {
 			"editor.inlineSuggest.suppressSuggestions": true
 		},
 		"configuration": [
 			{
-				"title": "%zetaConfiguration.general.title%",
+				"title": "%zetaConfiguration.server.title%",
 				"order": 10,
+				"properties": {
+					"zeta.serverUrl": {
+						"type": "string",
+						"default": "http://localhost:8080",
+						"order": 10,
+						"markdownDescription": "%zeta.serverUrl.description%"
+					},
+					"zeta.modelName": {
+						"type": "string",
+						"default": "zeta-edit-prediction",
+						"order": 20,
+						"markdownDescription": "%zeta.modelName.description%"
+					},
+					"zeta.temperature": {
+						"type": "number",
+						"default": 0.2,
+						"minimum": 0.0,
+						"maximum": 2.0,
+						"order": 30,
+						"markdownDescription": "%zeta.temperature.description%"
+					},
+					"zeta.streamEnabled": {
+						"type": "boolean",
+						"default": false,
+						"order": 40,
+						"scope": "window",
+						"markdownDescription": "%zeta.streamEnabled.description%"
+					},
+					"zeta.completionTimeoutMs": {
+						"type": "number",
+						"default": 10000,
+						"order": 50,
+						"markdownDescription": "%zeta.completionTimeoutMs.description%"
+					},
+					"zeta.maxTokens": {
+						"type": "number",
+						"default": 2048,
+						"order": 60,
+						"minimum": 1,
+						"markdownDescription": "%zeta.maxTokens.description%"
+					}
+				}
+			},
+			{
+				"title": "%zetaConfiguration.behavior.title%",
+				"order": 20,
 				"properties": {
 					"zeta.enabled": {
 						"type": "boolean",
@@ -159,78 +205,19 @@
 						"scope": "window",
 						"markdownDescription": "%zeta.enabled.description%"
 					},
-					"zeta.streamEnabled": {
+					"zeta.useCopilotStyleNextEditPresentation": {
 						"type": "boolean",
-						"default": false,
-						"order": 15,
-						"scope": "window",
-						"markdownDescription": "%zeta.streamEnabled.description%"
-					},
-					"zeta.temperature": {
-						"type": "number",
-						"default": 0.2,
-						"minimum": 0.0,
-						"maximum": 2.0,
+						"default": true,
 						"order": 20,
-						"markdownDescription": "%zeta.temperature.description%"
-					},
-					"zeta.maxContextFiles": {
-						"type": "number",
-						"default": 5,
-						"order": 100,
-						"minimum": 0,
-						"markdownDescription": "%zeta.maxContextFiles.description%"
-					},
-					"zeta.outlineSymbols": {
-						"type": "number",
-						"default": 0,
-						"order": 140,
-						"minimum": 0,
-						"markdownDescription": "%zeta.outlineSymbols.description%"
-					},
-					"zeta.maxEditHistory": {
-						"type": "number",
-						"default": 15,
-						"order": 110,
-						"minimum": 1,
-						"markdownDescription": "%zeta.maxEditHistory.description%"
-					},
-					"zeta.maxRecentChangesChars": {
-						"type": "number",
-						"default": 12000,
-						"order": 120,
-						"minimum": 0,
-						"markdownDescription": "%zeta.maxRecentChangesChars.description%"
-					},
-					"zeta.maxClipboardLines": {
-						"type": "number",
-						"default": 20,
-						"minimum": 0,
-						"order": 130,
-						"markdownDescription": "%zeta.maxClipboardLines.description%"
-					},
-					"zeta.stableRetrievalOrdering": {
-						"type": "boolean",
-						"default": false,
-						"order": 170,
-						"markdownDescription": "%zeta.stableRetrievalOrdering.description%"
-					},
-					"zeta.reuseIdenticalPromptResults": {
-						"type": "boolean",
-						"default": false,
-						"order": 180,
-						"markdownDescription": "%zeta.reuseIdenticalPromptResults.description%"
-					},
-					"zeta.identicalPromptCacheTtlMs": {
-						"type": "number",
-						"default": 5000,
-						"order": 190,
-						"minimum": 0,
-						"markdownDescription": "%zeta.identicalPromptCacheTtlMs.description%"
+						"scope": "window",
+						"markdownDescription": "%zeta.useCopilotStyleNextEditPresentation.description%",
+						"tags": [
+							"experimental"
+						]
 					},
 					"zeta.autocompleteExclusionPatterns": {
 						"type": "array",
-						"order": 50,
+						"order": 30,
 						"items": {
 							"type": "string"
 						},
@@ -248,77 +235,161 @@
 					"zeta.autocompleteSnoozeUntil": {
 						"type": "number",
 						"default": 0,
-						"order": 60,
-						"markdownDescription": "%zeta.autocompleteSnoozeUntil.description%"
-					},
-					"zeta.useCopilotStyleNextEditPresentation": {
-						"type": "boolean",
-						"default": true,
-						"order": 70,
-						"scope": "window",
-						"tags": [
-							"experimental"
-						],
-						"markdownDescription": "%zeta.useCopilotStyleNextEditPresentation.description%"
-					},
-					"zeta.serverUrl": {
-						"type": "string",
-						"default": "http://localhost:8080",
-						"order": 20,
-						"markdownDescription": "%zeta.serverUrl.description%"
-					},
-					"zeta.modelName": {
-						"type": "string",
-						"default": "zeta-edit-prediction",
-						"order": 30,
-						"markdownDescription": "%zeta.modelName.description%"
-					},
-					"zeta.completionTimeoutMs": {
-						"type": "number",
-						"default": 10000,
 						"order": 40,
-						"markdownDescription": "%zeta.completionTimeoutMs.description%"
+						"markdownDescription": "%zeta.autocompleteSnoozeUntil.description%"
 					},
 					"zeta.retriggerOnContextExit": {
 						"type": "boolean",
 						"default": false,
-						"order": 45,
+						"order": 50,
 						"markdownDescription": "%zeta.retriggerOnContextExit.description%"
 					},
 					"zeta.contextExitRetriggerDebounceMs": {
 						"type": "number",
 						"default": 1500,
 						"minimum": 0,
-						"order": 46,
+						"order": 55,
 						"markdownDescription": "%zeta.contextExitRetriggerDebounceMs.description%"
 					},
-					"zeta.diagRadius": {
+					"zeta.skipDebounceOnAccept": {
+						"type": "boolean",
+						"default": true,
+						"order": 60,
+						"markdownDescription": "%zeta.skipDebounceOnAccept.description%"
+					},
+					"zeta.suggestionCacheThreshold": {
 						"type": "number",
-						"default": 12,
-						"order": 160,
-						"markdownDescription": "%zeta.diagRadius.description%"
+						"default": 3,
+						"order": 70,
+						"minimum": 1,
+						"markdownDescription": "%zeta.suggestionCacheThreshold.description%"
+					},
+					"zeta.useEditRangeForCache": {
+						"type": "boolean",
+						"default": true,
+						"order": 80,
+						"markdownDescription": "%zeta.useEditRangeForCache.description%"
+					},
+					"zeta.editRangeMargin": {
+						"type": "number",
+						"default": 3,
+						"order": 85,
+						"minimum": 0,
+						"markdownDescription": "%zeta.editRangeMargin.description%"
+					},
+					"zeta.reuseIdenticalPromptResults": {
+						"type": "boolean",
+						"default": false,
+						"order": 90,
+						"markdownDescription": "%zeta.reuseIdenticalPromptResults.description%"
+					},
+					"zeta.identicalPromptCacheTtlMs": {
+						"type": "number",
+						"default": 5000,
+						"order": 95,
+						"minimum": 0,
+						"markdownDescription": "%zeta.identicalPromptCacheTtlMs.description%"
+					},
+					"zeta.stableRetrievalOrdering": {
+						"type": "boolean",
+						"default": false,
+						"order": 100,
+						"markdownDescription": "%zeta.stableRetrievalOrdering.description%"
+					}
+				}
+			},
+			{
+				"title": "%zetaConfiguration.context.title%",
+				"order": 30,
+				"properties": {
+					"zeta.editableTokens": {
+						"type": "number",
+						"default": 2500,
+						"order": 10,
+						"minimum": 1,
+						"markdownDescription": "%zeta.editableTokens.description%"
+					},
+					"zeta.zetaContextTokens": {
+						"type": "number",
+						"default": 150,
+						"order": 20,
+						"minimum": 0,
+						"markdownDescription": "%zeta.zetaContextTokens.description%"
+					},
+					"zeta.syntaxAwareExpansion": {
+						"type": "boolean",
+						"default": true,
+						"order": 30,
+						"markdownDescription": "%zeta.syntaxAwareExpansion.description%"
+					},
+					"zeta.maxContextFiles": {
+						"type": "number",
+						"default": 5,
+						"order": 40,
+						"minimum": 0,
+						"markdownDescription": "%zeta.maxContextFiles.description%"
+					},
+					"zeta.maxEditHistory": {
+						"type": "number",
+						"default": 15,
+						"order": 50,
+						"minimum": 1,
+						"markdownDescription": "%zeta.maxEditHistory.description%"
+					},
+					"zeta.maxRecentChangesChars": {
+						"type": "number",
+						"default": 12000,
+						"order": 60,
+						"minimum": 0,
+						"markdownDescription": "%zeta.maxRecentChangesChars.description%"
+					},
+					"zeta.maxClipboardLines": {
+						"type": "number",
+						"default": 20,
+						"order": 70,
+						"minimum": 0,
+						"markdownDescription": "%zeta.maxClipboardLines.description%"
+					},
+					"zeta.outlineSymbols": {
+						"type": "number",
+						"default": 0,
+						"order": 80,
+						"minimum": 0,
+						"markdownDescription": "%zeta.outlineSymbols.description%"
 					},
 					"zeta.rulesMaxChars": {
 						"type": "number",
 						"default": 3000,
-						"order": 150,
+						"order": 90,
 						"markdownDescription": "%zeta.rulesMaxChars.description%"
 					},
+					"zeta.diagRadius": {
+						"type": "number",
+						"default": 12,
+						"order": 100,
+						"markdownDescription": "%zeta.diagRadius.description%"
+					}
+				}
+			},
+			{
+				"title": "%zetaConfiguration.diagnostics.title%",
+				"order": 40,
+				"properties": {
 					"zeta.injectInlineDiagnostics": {
 						"type": "boolean",
 						"default": false,
-						"order": 230,
+						"order": 10,
 						"markdownDescription": "%zeta.injectInlineDiagnostics.description%"
 					},
 					"zeta.inlineDiagnosticsMarker": {
 						"type": "string",
 						"default": "BUG: LSP error here",
-						"order": 240,
+						"order": 20,
 						"markdownDescription": "%zeta.inlineDiagnosticsMarker.description%"
 					},
 					"zeta.diagnosticsMessageTransforms": {
 						"type": "object",
-						"order": 250,
+						"order": 30,
 						"default": {
 							"^(.*?) is a magic number;?\\s*consider replacing it with a named constant\\.?$": "replace $1 with a named constant",
 							"^Included header (\\S+) is not used directly\\.?$": "remove unused #include of $1",
@@ -332,68 +403,9 @@
 						}
 					}
 				}
-			},
-			{
-				"title": "%zetaConfiguration.activeFileContext.title%",
-				"order": 20,
-				"properties": {
-					"zeta.editableTokens": {
-										"type": "number",
-										"default": 2500,
-										"order": 10,
-										"minimum": 1,
-										"markdownDescription": "%zeta.editableTokens.description%"
-									},
-									"zeta.zetaContextTokens": {
-										"type": "number",
-										"default": 150,
-										"order": 20,
-										"minimum": 0,
-										"markdownDescription": "%zeta.zetaContextTokens.description%"
-									},
-									"zeta.maxTokens": {
-										"type": "number",
-										"default": 2048,
-										"order": 25,
-										"minimum": 1,
-										"markdownDescription": "%zeta.maxTokens.description%"
-									},
-									"zeta.syntaxAwareExpansion": {
-										"type": "boolean",
-										"default": true,
-										"order": 30,
-										"markdownDescription": "%zeta.syntaxAwareExpansion.description%"
-									},
-									"zeta.suggestionCacheThreshold": {
-										"type": "number",
-										"default": 3,
-										"order": 40,
-										"minimum": 1,
-										"markdownDescription": "%zeta.suggestionCacheThreshold.description%"
-									},
-									"zeta.useEditRangeForCache": {
-										"type": "boolean",
-										"default": true,
-										"order": 50,
-										"markdownDescription": "%zeta.useEditRangeForCache.description%"
-									},
-									"zeta.editRangeMargin": {
-										"type": "number",
-										"default": 3,
-										"order": 60,
-										"minimum": 0,
-										"markdownDescription": "%zeta.editRangeMargin.description%"
-									},
-									"zeta.skipDebounceOnAccept": {
-										"type": "boolean",
-										"default": true,
-										"order": 70,
-										"markdownDescription": "%zeta.skipDebounceOnAccept.description%"
-									}
-								}
-							}
-						]
-					},
+			}
+		]
+	},
 	"scripts": {
 		"build": "bun build src/extension/activate.ts --outfile=out/extension.js --external=vscode --format=cjs --target=node",
 		"typecheck": "bun tsgo --noEmit",

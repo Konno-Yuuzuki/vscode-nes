@@ -55,6 +55,7 @@ import {
 	ESTIMATED_BYTES_PER_TOKEN,
 } from "~/core/constants.ts";
 import { utf8ByteOffsetToUtf16Offset } from "~/utils/text.ts";
+import { inferSyntaxBlock } from "~/api/syntax-window.ts";
 import type {
 	EditRegion,
 	ModelPrompt,
@@ -184,6 +185,7 @@ export function selectZetaCursorWindow(
 	cursorLine: number,
 	editableTokens: number,
 	contextTokens: number,
+	syntaxAware = false,
 ): ZetaCursorWindow {
 	return selectZetaCursorWindowFromLineProvider(
 		lines.length,
@@ -191,6 +193,7 @@ export function selectZetaCursorWindow(
 		editableTokens,
 		contextTokens,
 		(line) => lines[line] ?? "",
+		syntaxAware,
 	);
 }
 
@@ -200,6 +203,7 @@ export function selectZetaCursorWindowFromLineProvider(
 	editableTokens: number,
 	contextTokens: number,
 	getLine: (line: number) => string,
+	syntaxAware = false,
 ): ZetaCursorWindow {
 	if (lineCount === 0) {
 		return {
@@ -218,14 +222,55 @@ export function selectZetaCursorWindowFromLineProvider(
 		getLine,
 		boundedCursorLine,
 	);
-	const editable = expandLineAlignedWindow(
-		lineCount,
-		getLine,
-		boundedCursorLine,
-		boundedCursorLine + 1,
-		editableBudgetBytes,
-		cursorLineBytes,
-	);
+
+	let editable: { start: number; end: number };
+
+	if (syntaxAware) {
+		// Try to expand to the enclosing syntactic block first (mirrors
+		// Zed's syntax-boundary expansion). Only adopt the block when it
+		// fits the editable budget; otherwise fall back to line-wise.
+		const block = inferSyntaxBlockFromLineProvider(
+			lineCount,
+			boundedCursorLine,
+			getLine,
+		);
+		if (block && block.start < boundedCursorLine) {
+			let blockBytes = 0;
+			for (let i = block.start; i < block.end; i++) {
+				blockBytes += linePromptByteLength(lineCount, getLine, i);
+			}
+			if (blockBytes <= editableBudgetBytes) {
+				editable = { start: block.start, end: block.end };
+			} else {
+				editable = expandLineAlignedWindow(
+					lineCount,
+					getLine,
+					boundedCursorLine,
+					boundedCursorLine + 1,
+					editableBudgetBytes,
+					cursorLineBytes,
+				);
+			}
+		} else {
+			editable = expandLineAlignedWindow(
+				lineCount,
+				getLine,
+				boundedCursorLine,
+				boundedCursorLine + 1,
+				editableBudgetBytes,
+				cursorLineBytes,
+			);
+		}
+	} else {
+		editable = expandLineAlignedWindow(
+			lineCount,
+			getLine,
+			boundedCursorLine,
+			boundedCursorLine + 1,
+			editableBudgetBytes,
+			cursorLineBytes,
+		);
+	}
 
 	const contextBudgetBytes =
 		Math.max(0, Math.floor(contextTokens)) * ESTIMATED_BYTES_PER_TOKEN;
@@ -244,6 +289,23 @@ export function selectZetaCursorWindowFromLineProvider(
 		contextStart: context.start,
 		contextEnd: context.end,
 	};
+}
+
+/**
+ * Line-provider variant of `inferSyntaxBlock`: collects the requested lines
+ * into an array (the window logic already works line-wise) and delegates to
+ * the array-based inference. Returns null when no block can be inferred.
+ */
+function inferSyntaxBlockFromLineProvider(
+	lineCount: number,
+	cursorLine: number,
+	getLine: (line: number) => string,
+): { start: number; end: number } | null {
+	const lines: string[] = [];
+	for (let i = 0; i < lineCount; i++) {
+		lines.push(getLine(i));
+	}
+	return inferSyntaxBlock(lines, cursorLine);
 }
 
 function expandLineAlignedWindow(

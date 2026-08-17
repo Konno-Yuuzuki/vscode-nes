@@ -8,8 +8,14 @@ import type { AutocompleteResult } from "~/api/schemas.ts";
  * This mirrors Copilot NES's behaviour: move cursor away → hide suggestion;
  * move cursor back (same content, same area) → re-show instantly.
  *
+ * Two cursor-move-back policies (P3):
+ *  - Fixed threshold: cursor within ±`cursorThreshold` lines of the request
+ *    line. (Copilot NES style.)
+ *  - Edit-range aware: cursor within the edit's start..end line range
+ *    expanded by `editRangeMargin`. (Zed invalidation_range style.)
+ *
  * The cache is invalidated on:
- *  - Document content change (contentHash differs)
+ *  - Document content change (content differs)
  *  - Suggestion accepted
  *  - Manual trigger (forceTrigger)
  *  - Cache age exceeded (CACHE_TTL_MS)
@@ -26,6 +32,10 @@ export interface CachedSuggestion {
 	documentVersion: number;
 	/** Timestamp when the entry was created */
 	timestamp: number;
+	/** First line of the edit range (P3 C) */
+	editStartLine?: number;
+	/** One past the last line of the edit range (P3 C) */
+	editEndLine?: number;
 }
 
 export interface SuggestionCacheOptions {
@@ -35,12 +45,18 @@ export interface SuggestionCacheOptions {
 	cacheTtlMs: number;
 	/** Max entries in the cache (LRU-like, oldest evicted) */
 	maxEntries: number;
+	/** Lines to add around the edit range when using edit-range matching */
+	editRangeMargin: number;
+	/** Use edit-range matching instead of the fixed cursor threshold */
+	useEditRange: boolean;
 }
 
 const DEFAULT_OPTIONS: SuggestionCacheOptions = {
 	cursorThreshold: 3,
 	cacheTtlMs: 15_000,
 	maxEntries: 5,
+	editRangeMargin: 3,
+	useEditRange: true,
 };
 
 export class SuggestionCache {
@@ -61,6 +77,7 @@ export class SuggestionCache {
 		requestLine: number,
 		content: string,
 		documentVersion: number,
+		editRange: { startLine: number; endLine: number } | undefined = undefined,
 	): void {
 		// Evict oldest if at capacity
 		if (this.cache.size >= this.options.maxEntries) {
@@ -76,6 +93,9 @@ export class SuggestionCache {
 			content,
 			documentVersion,
 			timestamp: Date.now(),
+			...(editRange
+				? { editStartLine: editRange.startLine, editEndLine: editRange.endLine }
+				: {}),
 		});
 	}
 
@@ -83,7 +103,7 @@ export class SuggestionCache {
 	 * Retrieve a cached suggestion if one exists and is valid for the
 	 * given cursor position and content. Returns null if:
 	 *  - No entry for the URI
-	 *  - Cursor moved beyond ±cursorThreshold lines from the request line
+	 *  - Cursor moved beyond the threshold (fixed or edit-range)
 	 *  - Content changed (document different)
 	 *  - Cache entry expired
 	 */
@@ -114,13 +134,32 @@ export class SuggestionCache {
 			return null;
 		}
 
-		// Cursor moved beyond threshold?
-		const lineDiff = Math.abs(currentCursorLine - entry.requestLine);
-		if (lineDiff > this.options.cursorThreshold) {
-			return null;
-		}
+		const inRange = this.cursorInRange(entry, currentCursorLine);
+		if (!inRange) return null;
 
 		return entry.suggestions;
+	}
+
+	/**
+	 * Decide whether the cursor is within the acceptable re-show range.
+	 * With edit-range matching (P3 C) the range is the edit's
+	 * start..end lines plus a margin; otherwise (P3 A) it's the request
+	 * line ± cursorThreshold.
+	 */
+	private cursorInRange(
+		entry: CachedSuggestion,
+		currentCursorLine: number,
+	): boolean {
+		if (this.options.useEditRange && entry.editStartLine !== undefined) {
+			const margin = this.options.editRangeMargin;
+			const minLine = Math.max(0, entry.editStartLine - margin);
+			const maxLine = (entry.editEndLine ?? entry.editStartLine) + margin;
+			return currentCursorLine >= minLine && currentCursorLine <= maxLine;
+		}
+
+		// Fixed-threshold policy (P3 A default behaviour)
+		const lineDiff = Math.abs(currentCursorLine - entry.requestLine);
+		return lineDiff <= this.options.cursorThreshold;
 	}
 
 	/**

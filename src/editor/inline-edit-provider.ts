@@ -366,7 +366,11 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 	private cachedDiagnostics: vscode.Diagnostic[] = [];
 	private cachedDiagnosticsUri: string | null = null;
 	/** Cache of recent suggestions for cursor-move-back re-show */
-	private readonly suggestionCache = new SuggestionCache();
+	private readonly suggestionCache = new SuggestionCache({
+		cursorThreshold: config.suggestionCacheThreshold,
+		useEditRange: config.useEditRangeForCache,
+		editRangeMargin: config.editRangeMargin,
+	});
 	/** Tracks typing cadence to adjust debounce dynamically */
 	private readonly debounceTracker = new DynamicDebounceTracker();
 
@@ -641,12 +645,20 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 			// end up stale for the current cursor position. The cache's
 			// content-hash check prevents serving stale results after edits.
 			if (results?.length) {
+				const first = results[0];
+				const editRange = first
+					? {
+							startLine: document.positionAt(first.startIndex).line,
+							endLine: document.positionAt(first.endIndex).line,
+						}
+					: undefined;
 				this.suggestionCache.store(
 					uri,
 					results,
 					requestSnapshot.position.line,
 					currentContent,
 					document.version,
+					editRange,
 				);
 			}
 
@@ -1135,6 +1147,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 				config.editableTokens,
 				config.zetaContextTokens,
 				(line) => document.lineAt(line).text,
+				config.syntaxAwareExpansion,
 			);
 			startLine = window.editableStart;
 			endLine = window.editableEnd;
@@ -1145,6 +1158,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 				config.editableTokens,
 				config.zetaContextTokens,
 				(line) => document.lineAt(line).text,
+				config.syntaxAwareExpansion,
 			);
 			startLine = window.editableStart;
 			endLine = window.editableEnd;
@@ -1465,6 +1479,11 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		// Invalidate cache: the accepted suggestion is no longer relevant
 		if (acceptedSuggestion?.uri) {
 			this.suggestionCache.invalidate(acceptedSuggestion.uri);
+		}
+		// P3 B: skip the next debounce so the follow-up prediction arrives
+		// faster after the user accepts a suggestion.
+		if (config.skipDebounceOnAccept) {
+			this.lastRequestTimestamp = 0;
 		}
 		if (
 			acceptedSuggestion &&

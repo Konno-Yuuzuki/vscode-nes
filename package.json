@@ -338,30 +338,62 @@
 				"order": 20,
 				"properties": {
 					"zeta.editableTokens": {
-						"type": "number",
-						"default": 2000,
-						"order": 10,
-						"minimum": 1,
-						"markdownDescription": "%zeta.editableTokens.description%"
-					},
-					"zeta.zetaContextTokens": {
-						"type": "number",
-						"default": 150,
-						"order": 20,
-						"minimum": 0,
-						"markdownDescription": "%zeta.zetaContextTokens.description%"
-										},
-										"zeta.maxTokens": {
-											"type": "number",
-											"default": 2048,
-											"order": 25,
-											"minimum": 1,
-											"markdownDescription": "%zeta.maxTokens.description%"
-										}
+										"type": "number",
+										"default": 2500,
+										"order": 10,
+										"minimum": 1,
+										"markdownDescription": "%zeta.editableTokens.description%"
+									},
+									"zeta.zetaContextTokens": {
+										"type": "number",
+										"default": 150,
+										"order": 20,
+										"minimum": 0,
+										"markdownDescription": "%zeta.zetaContextTokens.description%"
+									},
+									"zeta.maxTokens": {
+										"type": "number",
+										"default": 2048,
+										"order": 25,
+										"minimum": 1,
+										"markdownDescription": "%zeta.maxTokens.description%"
+									},
+									"zeta.syntaxAwareExpansion": {
+										"type": "boolean",
+										"default": true,
+										"order": 30,
+										"markdownDescription": "%zeta.syntaxAwareExpansion.description%"
+									},
+									"zeta.suggestionCacheThreshold": {
+										"type": "number",
+										"default": 3,
+										"order": 40,
+										"minimum": 1,
+										"markdownDescription": "%zeta.suggestionCacheThreshold.description%"
+									},
+									"zeta.useEditRangeForCache": {
+										"type": "boolean",
+										"default": true,
+										"order": 50,
+										"markdownDescription": "%zeta.useEditRangeForCache.description%"
+									},
+									"zeta.editRangeMargin": {
+										"type": "number",
+										"default": 3,
+										"order": 60,
+										"minimum": 0,
+										"markdownDescription": "%zeta.editRangeMargin.description%"
+									},
+									"zeta.skipDebounceOnAccept": {
+										"type": "boolean",
+										"default": true,
+										"order": 70,
+										"markdownDescription": "%zeta.skipDebounceOnAccept.description%"
 									}
-			}
-		]
-	},
+								}
+							}
+						]
+					},
 	"scripts": {
 		"build": "bun build src/extension/activate.ts --outfile=out/extension.js --external=vscode --format=cjs --target=node",
 		"typecheck": "bun tsgo --noEmit",

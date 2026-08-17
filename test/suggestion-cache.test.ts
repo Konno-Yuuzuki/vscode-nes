@@ -196,4 +196,98 @@ describe("SuggestionCache", () => {
 		expect(result?.[0]?.completion).toBe("first");
 		expect(result?.[1]?.completion).toBe("second");
 	});
+
+	test("P3C: edit-range matching covers the edit range + margin", () => {
+		const cache = new SuggestionCache({ useEditRange: true, editRangeMargin: 3 });
+		const sug = [makeSuggestion()];
+		// Edit spans lines 8..15 (endLine exclusive), request made at line 10
+		cache.store(URI_A, sug, LINE_10, CONTENT_A, VERSION, {
+			startLine: 8,
+			endLine: 15,
+		});
+
+		// Inside the range + margin: lines 5..18
+		expect(cache.get(URI_A, 5, CONTENT_A, VERSION)).toEqual(sug);
+		expect(cache.get(URI_A, 8, CONTENT_A, VERSION)).toEqual(sug);
+		expect(cache.get(URI_A, 10, CONTENT_A, VERSION)).toEqual(sug);
+		expect(cache.get(URI_A, 15, CONTENT_A, VERSION)).toEqual(sug);
+		expect(cache.get(URI_A, 18, CONTENT_A, VERSION)).toEqual(sug);
+		// Outside the range + margin
+		expect(cache.get(URI_A, 4, CONTENT_A, VERSION)).toBeNull();
+		expect(cache.get(URI_A, 19, CONTENT_A, VERSION)).toBeNull();
+	});
+
+	test("P3C: edit-range matching with zero margin is exact", () => {
+		const cache = new SuggestionCache({ useEditRange: true, editRangeMargin: 0 });
+		const sug = [makeSuggestion()];
+		cache.store(URI_A, sug, LINE_10, CONTENT_A, VERSION, {
+			startLine: 10,
+			endLine: 12,
+		});
+
+		expect(cache.get(URI_A, 10, CONTENT_A, VERSION)).toEqual(sug);
+		expect(cache.get(URI_A, 11, CONTENT_A, VERSION)).toEqual(sug);
+		expect(cache.get(URI_A, 12, CONTENT_A, VERSION)).toEqual(sug);
+		expect(cache.get(URI_A, 9, CONTENT_A, VERSION)).toBeNull();
+		expect(cache.get(URI_A, 13, CONTENT_A, VERSION)).toBeNull();
+	});
+
+	test("P3C: edit-range matching clamps negative start line", () => {
+		const cache = new SuggestionCache({ useEditRange: true, editRangeMargin: 3 });
+		const sug = [makeSuggestion()];
+		// Edit starts at line 0 → minLine clamps to 0
+		cache.store(URI_A, sug, 2, CONTENT_A, VERSION, {
+			startLine: 0,
+			endLine: 5,
+		});
+
+		expect(cache.get(URI_A, 0, CONTENT_A, VERSION)).toEqual(sug);
+		expect(cache.get(URI_A, 1, CONTENT_A, VERSION)).toEqual(sug);
+	});
+
+	test("P3A: fixed threshold when useEditRange is false", () => {
+		const cache = new SuggestionCache({ useEditRange: false, cursorThreshold: 5 });
+		const sug = [makeSuggestion()];
+		// Even though an edit range is provided, useEditRange=false ignores it
+		cache.store(URI_A, sug, LINE_10, CONTENT_A, VERSION, {
+			startLine: 0,
+			endLine: 40,
+		});
+
+		expect(cache.get(URI_A, 10, CONTENT_A, VERSION)).toEqual(sug);
+		expect(cache.get(URI_A, 15, CONTENT_A, VERSION)).toEqual(sug); // ±5
+		expect(cache.get(URI_A, 5, CONTENT_A, VERSION)).toEqual(sug); // ±5
+		expect(cache.get(URI_A, 16, CONTENT_A, VERSION)).toBeNull(); // beyond ±5
+		expect(cache.get(URI_A, 4, CONTENT_A, VERSION)).toBeNull();
+	});
+
+	test("P3C: falls back to fixed threshold when no edit range stored", () => {
+		const cache = new SuggestionCache({
+			useEditRange: true,
+			cursorThreshold: 3,
+			editRangeMargin: 3,
+		});
+		const sug = [makeSuggestion()];
+		// No edit range passed → fixed threshold on requestLine
+		cache.store(URI_A, sug, LINE_10, CONTENT_A, VERSION);
+
+		expect(cache.get(URI_A, 13, CONTENT_A, VERSION)).toEqual(sug);
+		expect(cache.get(URI_A, 7, CONTENT_A, VERSION)).toEqual(sug);
+		expect(cache.get(URI_A, 14, CONTENT_A, VERSION)).toBeNull();
+	});
+
+	test("P3C: large edit range is more forgiving than fixed threshold", () => {
+		const cache = new SuggestionCache({ useEditRange: true, editRangeMargin: 3 });
+		const sug = [makeSuggestion()];
+		// A big 40-line edit: cursor 10 lines below the request line is still
+		// "near" the edit (inside the edit body), whereas a fixed ±3 would miss.
+		cache.store(URI_A, sug, LINE_10, CONTENT_A, VERSION, {
+			startLine: 10,
+			endLine: 50,
+		});
+
+		expect(cache.get(URI_A, 40, CONTENT_A, VERSION)).toEqual(sug);
+		// But clearly outside the edit body (before the edit start - margin)
+		expect(cache.get(URI_A, 5, CONTENT_A, VERSION)).toBeNull();
+	});
 });

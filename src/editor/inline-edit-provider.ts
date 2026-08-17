@@ -7,6 +7,7 @@ import { config } from "~/core/config";
 import { JUMP_RETRIGGER_DELAY_MS } from "~/core/constants.ts";
 import { logger } from "~/core/logger.ts";
 import type { JumpEditManager } from "~/editor/jump-edit-manager.ts";
+import { DynamicDebounceTracker } from "~/editor/dynamic-debounce.ts";
 import { SuggestionCache } from "~/editor/suggestion-cache.ts";
 import {
 	enableForwardStability,
@@ -366,6 +367,8 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 	private cachedDiagnosticsUri: string | null = null;
 	/** Cache of recent suggestions for cursor-move-back re-show */
 	private readonly suggestionCache = new SuggestionCache();
+	/** Tracks typing cadence to adjust debounce dynamically */
+	private readonly debounceTracker = new DynamicDebounceTracker();
 
 	constructor(
 		tracker: DocumentTracker,
@@ -962,12 +965,16 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		token: vscode.CancellationToken,
 	): Promise<boolean> {
 		const now = Date.now();
+		this.debounceTracker.recordInvocation(now);
+		const dynamicDebounceMs = this.debounceTracker.computeDebounceMs(
+			INLINE_REQUEST_DEBOUNCE_MS,
+		);
 		const elapsed = now - this.lastRequestTimestamp;
 		this.lastRequestTimestamp = now;
 
-		const delay = Math.max(0, INLINE_REQUEST_DEBOUNCE_MS - elapsed);
+		const delay = Math.max(0, dynamicDebounceMs - elapsed);
 		logger.trace(
-			`waitForDebounce req=${requestId} elapsed=${elapsed} delay=${delay} tokenCancelled=${token.isCancellationRequested} isLatest=${this.isLatestRequest(requestId)}`,
+			`waitForDebounce req=${requestId} elapsed=${elapsed} dynamic=${dynamicDebounceMs} delay=${delay} tokenCancelled=${token.isCancellationRequested} isLatest=${this.isLatestRequest(requestId)}`,
 		);
 		if (delay === 0) return !token.isCancellationRequested;
 

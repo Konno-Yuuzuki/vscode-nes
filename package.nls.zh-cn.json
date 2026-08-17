@@ -30,9 +30,9 @@
 	"zeta.zetaContextTokens.description": "Zeta-2.1 可编辑摘录周围的额外非编辑当前文件上下文的近似总 token 预算。使用相同的廉价 **UTF-8 字节 / 3** 估算和整行边界。编辑前的上下文放在 FIM prefix 中；编辑后的上下文放在 FIM suffix 中。设为 `0` 禁用此周围上下文。默认 `150` 遵循 Zeta V0318 提供器配置。",
 	"zeta.maxTokens.description": "模型每次请求允许生成的最大 token 数（`max_tokens` / `n_predict`）。模型即使只改一行也会重写整个可编辑窗口，因此值过低会在窗口中截断响应，扩展会**丢弃**截断的响应（finishReason=length）。默认 `2048` 足够大，健康的响应不会达到此上限。如果观察到模型生成过长的补全，可谨慎减小。",
 
-	"zeta.syntaxAwareExpansion.description": "启用语法感知的可编辑窗口扩展（P2）。使用括号深度启发式方法将光标所在函数/块/类边界包含在内，而非纯逐行扩展。无需语言服务器支持。对括号规整的代码块效果最明显。",
-	"zeta.suggestionCacheThreshold.description": "P3 A：光标移回重显的固定行数阈值。当光标回到原始请求位置此范围内时，立即重显缓存的建议而不发起新请求。仅在 `useEditRangeForCache` 关闭时使用。",
-	"zeta.useEditRangeForCache.description": "P3 C：使用编辑的实际行范围（加上 `editRangeMargin`）而非距请求行的固定偏移来决定光标移回重显条件。大编辑更宽容——光标可远离请求行，只要仍在编辑体内即可触发重显。",
+	"zeta.syntaxAwareExpansion.description": "启用语法感知的可编辑窗口扩展。使用括号深度启发式方法将光标所在函数/块/类边界包含在内，而非纯逐行扩展。无需语言服务器支持。对括号规整的代码块效果最明显。",
+	"zeta.suggestionCacheThreshold.description": "光标移回重显的固定行数阈值。当光标回到原始请求位置此范围内时，立即重显缓存的建议而不发起新请求。仅在 `useEditRangeForCache` 关闭时使用。",
+	"zeta.useEditRangeForCache.description": "使用编辑的实际行范围（加上 `editRangeMargin`）而非距请求行的固定偏移来决定光标移回重显条件。大编辑更宽容——光标可远离请求行，只要仍在编辑体内即可触发重显。",
 	"zeta.editRangeMargin.description": "启用 `useEditRangeForCache` 时，在编辑范围周围添加的额外行数。边距为 `3` 表示光标可在编辑开始前 3 行或编辑结束后 3 行内仍可重显缓存的建议。",
-	"zeta.skipDebounceOnAccept.description": "P3 B：接受建议后跳过输入防抖，使后续预测请求立即触发而无需等待防抖超时。让连续接受→预测的循环感觉更流畅。"
+	"zeta.skipDebounceOnAccept.description": "接受建议后跳过输入防抖，使后续预测请求立即触发而无需等待防抖超时。让连续接受→预测的循环感觉更流畅。"
 }

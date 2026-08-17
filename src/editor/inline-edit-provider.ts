@@ -613,8 +613,10 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 
 			if (
 				!config.enabled ||
-				token.isCancellationRequested ||
-				!responseResults?.length
+				!responseResults?.length ||
+				// If the response was cancelled but it's still the latest request,
+				// don't discard it — the server finished and the result is valid.
+				(!this.isLatestRequest(requestId) && token.isCancellationRequested)
 			) {
 				logger.debug("Inline edit response discarded before render", {
 					uri,

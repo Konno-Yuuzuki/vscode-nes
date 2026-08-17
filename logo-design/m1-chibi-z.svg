@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#409efc"/>
+      <stop offset="100%" style="stop-color:#7c3aed"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="24" ry="24" fill="#1a1a2e"/>
+  <!-- 脸 -->
+  <circle cx="64" cy="68" r="32" fill="white" opacity="0.12"/>
+  <!-- 眼睛 - 大眼萌 -->
+  <ellipse cx="50" cy="62" rx="8" ry="9" fill="white" opacity="0.95"/>
+  <ellipse cx="78" cy="62" rx="8" ry="9" fill="white" opacity="0.95"/>
+  <ellipse cx="52" cy="63" rx="5" ry="6" fill="#1a1a2e"/>
+  <ellipse cx="80" cy="63" rx="5" ry="6" fill="#1a1a2e"/>
+  <circle cx="48" cy="59" r="2.5" fill="white" opacity="0.9"/>
+  <circle cx="76" cy="59" r="2.5" fill="white" opacity="0.9"/>
+  <!-- 嘴巴 - 微笑 -->
+  <path d="M 58,76 Q 64,82 70,76" stroke="white" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <!-- 腮红 -->
+  <ellipse cx="40" cy="72" rx="6" ry="4" fill="#f472b6" opacity="0.25"/>
+  <ellipse cx="88" cy="72" rx="6" ry="4" fill="#f472b6" opacity="0.25"/>
+  <!-- Z 发饰 - 头顶 -->
+  <path d="M 48,32 L 80,32 L 48,44 L 80,44"
+        stroke="url(#g)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <!-- 呆毛 -->
+  <path d="M 64,28 C 64,20 58,16 52,18"
+        stroke="white" stroke-width="2.5" fill="none" stroke-linecap="round" opacity="0.6"/>
+</svg>

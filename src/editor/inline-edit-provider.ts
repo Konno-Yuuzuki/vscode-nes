@@ -7,6 +7,7 @@ import { config } from "~/core/config";
 import { JUMP_RETRIGGER_DELAY_MS } from "~/core/constants.ts";
 import { logger } from "~/core/logger.ts";
 import type { JumpEditManager } from "~/editor/jump-edit-manager.ts";
+import { SuggestionCache } from "~/editor/suggestion-cache.ts";
 import {
 	enableForwardStability,
 	markAsProposedInlineEdit,
@@ -363,6 +364,8 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 	 *  indexing). */
 	private cachedDiagnostics: vscode.Diagnostic[] = [];
 	private cachedDiagnosticsUri: string | null = null;
+	/** Cache of recent suggestions for cursor-move-back re-show */
+	private readonly suggestionCache = new SuggestionCache();
 
 	constructor(
 		tracker: DocumentTracker,
@@ -444,6 +447,32 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		const isManualInvoke =
 			context.triggerKind === vscode.InlineCompletionTriggerKind.Invoke ||
 			this.forceTriggerRequested;
+
+		// Cursor-move-back: if content hasn't changed but the cursor returned
+		// within ±3 lines of a previously suggested edit, re-show it instantly
+		// without triggering a new model request.
+		if (
+			this.forceTriggerRequested !== true &&
+			this.lastContent !== null &&
+			currentContent === this.lastContent &&
+			!isManualInvoke
+		) {
+			const cached = this.suggestionCache.get(
+				uri,
+				position.line,
+				currentContent,
+				document.version,
+			);
+			if (cached?.length) {
+				logger.debug(
+					`Returning cached suggestion for cursor-move-back req=${requestId} line=${position.line}`,
+				);
+				return this.buildCompletionItem(document, position, cached[0], {
+					useProposedInlineEditPresentation: config.useCopilotStyleNextEditPresentation,
+				});
+			}
+		}
+
 		if (
 			this.forceTriggerRequested !== true &&
 			this.lastContent !== null &&
@@ -602,6 +631,19 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 			if (config.useCopilotStyleNextEditPresentation) {
 				results = results.flatMap((result) =>
 					splitDisjointLineEdits(document.getText(), result),
+				);
+			}
+
+			// Cache results for cursor-move-back re-show, even if they
+			// end up stale for the current cursor position. The cache's
+			// content-hash check prevents serving stale results after edits.
+			if (results?.length) {
+				this.suggestionCache.store(
+					uri,
+					results,
+					requestSnapshot.position.line,
+					currentContent,
+					document.version,
 				);
 			}
 
@@ -1413,6 +1455,10 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 	}
 
 	handleInlineAccept(acceptedSuggestion?: AcceptedInlineSuggestion): void {
+		// Invalidate cache: the accepted suggestion is no longer relevant
+		if (acceptedSuggestion?.uri) {
+			this.suggestionCache.invalidate(acceptedSuggestion.uri);
+		}
 		if (
 			acceptedSuggestion &&
 			this.lastInlineEdit?.suggestion.id === acceptedSuggestion.id

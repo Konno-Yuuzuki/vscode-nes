@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#409efc"/>
+      <stop offset="100%" style="stop-color:#7c3aed"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="24" ry="24" fill="#1a1a2e"/>
+  <!-- 长发 -->
+  <path d="M 40,40 C 28,50 24,72 28,96 C 30,104 36,110 40,110"
+        stroke="url(#g)" stroke-width="8" stroke-linecap="round" fill="none" opacity="0.3"/>
+  <path d="M 88,40 C 100,50 104,72 100,96 C 98,104 92,110 88,110"
+        stroke="url(#g)" stroke-width="8" stroke-linecap="round" fill="none" opacity="0.3"/>
+  <!-- 脸 -->
+  <circle cx="64" cy="64" r="24" fill="white" opacity="0.08"/>
+  <!-- 眼睛 - 闪亮 -->
+  <ellipse cx="52" cy="60" rx="7" ry="8" fill="white" opacity="0.9"/>
+  <ellipse cx="76" cy="60" rx="7" ry="8" fill="white" opacity="0.9"/>
+  <ellipse cx="54" cy="61" rx="4" ry="5" fill="#1a1a2e"/>
+  <ellipse cx="78" cy="61" rx="4" ry="5" fill="#1a1a2e"/>
+  <circle cx="50" cy="57" r="2" fill="white"/>
+  <circle cx="74" cy="57" r="2" fill="white"/>
+  <!-- 嘴巴 - 张嘴 -->
+  <ellipse cx="64" cy="74" rx="4" ry="3" fill="white" opacity="0.6"/>
+  <!-- 腮红 -->
+  <ellipse cx="40" cy="68" rx="5" ry="3" fill="#f472b6" opacity="0.3"/>
+  <ellipse cx="88" cy="68" rx="5" ry="3" fill="#f472b6" opacity="0.3"/>
+  <!-- Z 发夹 -->
+  <path d="M 54,30 L 74,30 L 54,40 L 74,40"
+        stroke="url(#g)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <!-- 小星星光晕 -->
+  <path d="M 94,34 L 96,40 L 102,42 L 96,44 L 94,50 L 92,44 L 86,42 L 92,40 Z"
+        fill="#fbbf24" opacity="0.5"/>
+  <path d="M 30,40 L 31,43 L 34,44 L 31,45 L 30,48 L 29,45 L 26,44 L 29,43 Z"
+        fill="#fbbf24" opacity="0.4"/>
+</svg>

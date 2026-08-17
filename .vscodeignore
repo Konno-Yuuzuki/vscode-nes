@@ -10,3 +10,6 @@ biome.json
 bun.lock
 tsconfig.json
 **/*.map
+docs/**
+logo-design/**
+test/**

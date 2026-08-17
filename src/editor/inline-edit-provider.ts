@@ -611,6 +611,34 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 				}
 			}
 
+			// Cache results for cursor-move-back re-show BEFORE any discard
+			// decision: even a response that ends up cancelled/stale for the
+			// current cursor can be re-shown when the cursor returns to the
+			// edit range. The cache's content-hash check prevents serving
+			// stale results after edits.
+			if (config.enabled && responseResults?.length) {
+				const splitResults = config.useCopilotStyleNextEditPresentation
+					? responseResults.flatMap((result) =>
+							splitDisjointLineEdits(document.getText(), result),
+						)
+					: responseResults;
+				const first = splitResults[0];
+				const cacheEditRange = first
+					? {
+							startLine: document.positionAt(first.startIndex).line,
+							endLine: document.positionAt(first.endIndex).line,
+						}
+					: undefined;
+				this.suggestionCache.store(
+					uri,
+					splitResults,
+					requestSnapshot.position.line,
+					currentContent,
+					document.version,
+					cacheEditRange,
+				);
+			}
+
 			if (
 				!config.enabled ||
 				!responseResults?.length ||
@@ -646,27 +674,6 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 			if (config.useCopilotStyleNextEditPresentation) {
 				results = results.flatMap((result) =>
 					splitDisjointLineEdits(document.getText(), result),
-				);
-			}
-
-			// Cache results for cursor-move-back re-show, even if they
-			// end up stale for the current cursor position. The cache's
-			// content-hash check prevents serving stale results after edits.
-			if (results?.length) {
-				const first = results[0];
-				const editRange = first
-					? {
-							startLine: document.positionAt(first.startIndex).line,
-							endLine: document.positionAt(first.endIndex).line,
-						}
-					: undefined;
-				this.suggestionCache.store(
-					uri,
-					results,
-					requestSnapshot.position.line,
-					currentContent,
-					document.version,
-					editRange,
 				);
 			}
 
@@ -1121,13 +1128,21 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 			arguments: [acceptedSuggestion],
 		};
 		if (useProposedInlineEditPresentation) {
+			// VS Code's custom inline-edit build derives the ghost-text hint
+			// anchor from `displayLocation`. Without it the hint is `void 0`
+			// and the inline edit is created but never rendered. Default to
+			// the edit start anchor with a Code-style label; callers can
+			// override with their own displayLocation.
 			const proposedOptions: Parameters<typeof markAsProposedInlineEdit>[1] = {
 				correlationId: result.id,
 				showRange: editRange,
+				displayLocation:
+					options.displayLocation ?? {
+						range: new vscode.Range(startPosition, startPosition),
+						kind: 1,
+						label: "",
+					},
 			};
-			if (options.displayLocation) {
-				proposedOptions.displayLocation = options.displayLocation;
-			}
 			markAsProposedInlineEdit(item, proposedOptions);
 		}
 

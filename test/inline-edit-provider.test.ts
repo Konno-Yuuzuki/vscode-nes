@@ -5,10 +5,10 @@ import type { ApiClient } from "~/api/client.ts";
 import type { AutocompleteResult } from "~/api/schemas.ts";
 import {
 	type AcceptedInlineSuggestion,
-	InlineEditProvider,
 	inlineEditMatchesSelectedCompletion,
 	splitDisjointLineEdits,
-} from "~/editor/inline-edit-provider.ts";
+} from "~/editor/inline-edit-renderer.ts";
+import { InlineEditProvider } from "~/editor/inline-edit-provider.ts";
 import type { JumpEditManager } from "~/editor/jump-edit-manager.ts";
 import type { DocumentTracker } from "~/telemetry/document-tracker.ts";
 

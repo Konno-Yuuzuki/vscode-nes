@@ -21,6 +21,14 @@ import {
 } from "~/telemetry/document-tracker.ts";
 import { toUnixPath } from "~/utils/path.ts";
 import { isFileTooLarge, utf8ByteOffsetAt } from "~/utils/text.ts";
+import {
+	InlineEditRenderer,
+	inlineEditMatchesSelectedCompletion,
+	splitDisjointLineEdits,
+	type AcceptedInlineSuggestion,
+	type PendingProposedJump,
+} from "./inline-edit-renderer.ts";
+import { CursorHandler } from "./cursor-handler.ts";
 
 const INLINE_REQUEST_DEBOUNCE_MS = 300;
 /** Max age (ms) of an in-flight request that can still be piggybacked.
@@ -32,308 +40,11 @@ const BULK_CHANGE_LOOKBACK_MS = 1500;
 const BULK_CHANGE_CHAR_THRESHOLD = 200;
 const BULK_CHANGE_LINE_THRESHOLD = 8;
 const SELECTION_LOOKBACK_MS = 5000;
-const MAX_SPLIT_DIFF_LINES = 128;
-
-interface QueuedSuggestionState {
-	uri: string;
-	suggestions: AutocompleteResult[];
-}
-
-interface RequestSnapshot {
-	uri: string;
-	version: number;
-	position: vscode.Position;
-	content: string;
-	cursorOffset: number;
-}
-
-interface EditableContextWindow {
-	uri: string;
-	version: number;
-	startLine: number;
-	endLine: number;
-	anchorLine: number;
-	retriggered: boolean;
-	timer?: ReturnType<typeof setTimeout>;
-}
-
-interface PendingProposedJump {
-	uri: string;
-	version: number;
-	targetLine: number;
-	/** Model cursor marker inside the completion, restored after the
-	 *  native inline-edit accept applies the text (item.command is NOT
-	 *  executed by VS Code for isInlineEdit=true items, so we arm the
-	 *  restore on the document-change event instead). */
-	cursorTargetOffset?: number;
-	/** Document offset of the edit start; target = startIndex + cursorTargetOffset. */
-	startIndex?: number;
-	/** Completion length — used to discard the arm when the applied
-	 *  text does not match the suggested replacement. */
-	completionLength?: number;
-	/** Document offset of the edit end (replaced range). */
-	endIndex?: number;
-}
-
-export interface AcceptedInlineSuggestion {
-	id: string;
-	uri: string;
-	startIndex: number;
-	endIndex: number;
-	completion: string;
-	// Proposed inline edits must use plain text because VS Code's snippet
-	// acceptance path can minimize the deletion range while still inserting
-	// the full snippet. When present, restore the model's cursor after the
-	// plain-text replacement has been accepted.
-	cursorTargetOffset?: number;
-}
-
-interface CompletionItemBuildOptions {
-	useProposedInlineEditPresentation?: boolean;
-	displayLocation?: ProposedInlineCompletionDisplayLocation;
-}
-
-// Build a SnippetString that places the final cursor ($0) at the model's
-// predicted post-edit position. Snippet metacharacters in the surrounding
-// text need to be escaped — `$`, `}` and `\` would otherwise be parsed as
-// snippet syntax.
-function toSnippetWithCursor(
-	completion: string,
-	cursorOffset: number,
-): vscode.SnippetString {
-	const escapeSnippet = (s: string) => s.replace(/[\\$}]/g, "\\$&");
-	const before = escapeSnippet(completion.slice(0, cursorOffset));
-	const after = escapeSnippet(completion.slice(cursorOffset));
-	return new vscode.SnippetString(`${before}$0${after}`);
-}
-
-export function inlineEditMatchesSelectedCompletion(
-	document: vscode.TextDocument,
-	result: AutocompleteResult,
-	selectedCompletionInfo: vscode.SelectedCompletionInfo,
-): boolean {
-	const editRange = new vscode.Range(
-		document.positionAt(result.startIndex),
-		document.positionAt(result.endIndex),
-	);
-	return (
-		rangesEqual(editRange, selectedCompletionInfo.range) &&
-		result.completion.startsWith(selectedCompletionInfo.text)
-	);
-}
-
-function rangesEqual(a: vscode.Range, b: vscode.Range): boolean {
-	return positionsEqual(a.start, b.start) && positionsEqual(a.end, b.end);
-}
-
-function positionsEqual(a: vscode.Position, b: vscode.Position): boolean {
-	return a.line === b.line && a.character === b.character;
-}
-
-interface LineEdit {
-	oldStart: number;
-	oldEnd: number;
-	newStart: number;
-	newEnd: number;
-}
-
-/**
- * Split independent replacement hunks so proposed inline edits do not render
- * unchanged code between them as one large Copilot-style suggestion. A final
- * insertion can be split safely because it is anchored at the end of the
- * original range. A final shortened hunk is treated as a truncated model
- * tail, preserving unmatched old lines rather than turning the last intended
- * replacement into a large deletion.
- */
-export function splitDisjointLineEdits(
-	documentText: string,
-	result: AutocompleteResult,
-): AutocompleteResult[] {
-	if (
-		result.cursorTargetOffset !== undefined ||
-		result.startIndex < 0 ||
-		result.endIndex < result.startIndex ||
-		result.endIndex > documentText.length
-	) {
-		return [result];
-	}
-
-	const oldText = documentText.slice(result.startIndex, result.endIndex);
-	const oldLines = oldText.split("\n");
-	const newLines = result.completion.split("\n");
-	if (
-		oldLines.length > MAX_SPLIT_DIFF_LINES ||
-		newLines.length > MAX_SPLIT_DIFF_LINES
-	) {
-		return [result];
-	}
-
-	const edits = findLineEdits(oldLines, newLines);
-	if (edits.length < 2) return [result];
-
-	const splitEdits: LineEdit[] = [];
-	for (let index = 0; index < edits.length; index++) {
-		const edit = edits[index];
-		if (!edit) return [result];
-		const oldLength = edit.oldEnd - edit.oldStart;
-		const newLength = edit.newEnd - edit.newStart;
-		if (oldLength === newLength && oldLength > 0) {
-			splitEdits.push(edit);
-			continue;
-		}
-		// Sweep sometimes stops directly after the final replacement, omitting
-		// the unchanged tail of the rewrite window. Preserve that tail so it
-		// does not become a destructive deletion in the last small suggestion.
-		if (index === edits.length - 1 && oldLength > newLength && newLength > 0) {
-			splitEdits.push({
-				...edit,
-				oldEnd: edit.oldStart + newLength,
-			});
-			continue;
-		}
-		if (
-			index === edits.length - 1 &&
-			oldLength === 0 &&
-			newLength > 0 &&
-			edit.oldStart === oldLines.length
-		) {
-			splitEdits.push(edit);
-			continue;
-		}
-		return [result];
-	}
-
-	const oldLineOffsets = lineOffsets(oldLines);
-	return splitEdits.map((edit, index) => {
-		const isFinalInsertion =
-			edit.oldStart === edit.oldEnd && edit.oldStart === oldLines.length;
-		const oldSegment = oldLines.slice(edit.oldStart, edit.oldEnd).join("\n");
-		const insertionPrefix = isFinalInsertion ? "\n" : "";
-		const relativeStart = isFinalInsertion
-			? oldText.length
-			: (oldLineOffsets[edit.oldStart] ?? 0);
-		return {
-			...result,
-			id: `${result.id}:part${index + 1}`,
-			startIndex: result.startIndex + relativeStart,
-			endIndex: result.startIndex + relativeStart + oldSegment.length,
-			completion:
-				insertionPrefix + newLines.slice(edit.newStart, edit.newEnd).join("\n"),
-		};
-	});
-}
-
-function lineOffsets(lines: string[]): number[] {
-	const offsets = [0];
-	for (const line of lines) {
-		offsets.push((offsets.at(-1) ?? 0) + line.length + 1);
-	}
-	return offsets;
-}
-
-function findLineEdits(oldLines: string[], newLines: string[]): LineEdit[] {
-	const oldCount = oldLines.length;
-	const newCount = newLines.length;
-	const lcs = Array.from(
-		{ length: oldCount + 1 },
-		() => new Uint16Array(newCount + 1),
-	);
-	for (let oldIndex = oldCount - 1; oldIndex >= 0; oldIndex--) {
-		for (let newIndex = newCount - 1; newIndex >= 0; newIndex--) {
-			if (oldLines[oldIndex] === newLines[newIndex]) {
-				lcs[oldIndex][newIndex] = (lcs[oldIndex + 1]?.[newIndex + 1] ?? 0) + 1;
-			} else {
-				lcs[oldIndex][newIndex] = Math.max(
-					lcs[oldIndex + 1]?.[newIndex] ?? 0,
-					lcs[oldIndex]?.[newIndex + 1] ?? 0,
-				);
-			}
-		}
-	}
-
-	const edits: LineEdit[] = [];
-	let oldIndex = 0;
-	let newIndex = 0;
-	let current: LineEdit | null = null;
-	const closeCurrent = () => {
-		if (!current) return;
-		edits.push(current);
-		current = null;
-	};
-	const extendCurrent = () => {
-		if (!current) {
-			current = {
-				oldStart: oldIndex,
-				oldEnd: oldIndex,
-				newStart: newIndex,
-				newEnd: newIndex,
-			};
-		}
-		return current;
-	};
-
-	while (oldIndex < oldCount || newIndex < newCount) {
-		if (
-			oldIndex < oldCount &&
-			newIndex < newCount &&
-			oldLines[oldIndex] === newLines[newIndex]
-		) {
-			closeCurrent();
-			oldIndex++;
-			newIndex++;
-			continue;
-		}
-		if (
-			newIndex < newCount &&
-			(oldIndex === oldCount ||
-				(lcs[oldIndex]?.[newIndex + 1] ?? 0) >
-					(lcs[oldIndex + 1]?.[newIndex] ?? 0))
-		) {
-			extendCurrent().newEnd++;
-			newIndex++;
-		} else {
-			extendCurrent().oldEnd++;
-			oldIndex++;
-		}
-	}
-	closeCurrent();
-	return edits;
-}
-
-/** Command names for hiding the native suggest widget across VS Code versions. */
-const SUGGEST_HIDE_COMMANDS = [
-	"editor.action.suggestWidget.hide",
-	"editor.action.closeSuggestWidget",
-	"closeSuggestWidget",
-	"hideSuggestWidget",
-];
-
-/** Awaitable version of hideSuggestWidget. Returns a promise that resolves
- *  when the first successful close command completes. */
-async function hideSuggestWidgetAsync(): Promise<void> {
-	for (const cmd of SUGGEST_HIDE_COMMANDS) {
-		try {
-			await vscode.commands.executeCommand(cmd);
-			return;
-		} catch {
-			// Try next command
-		}
-	}
-}
-
 export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 	private tracker: DocumentTracker;
 	private jumpEditManager: JumpEditManager;
 	private api: ApiClient;
-	private lastInlineEdit: {
-		uri: string;
-		line: number;
-		character: number;
-		version: number;
-		suggestion: AcceptedInlineSuggestion;
-	} | null = null;
-	private queuedSuggestions: QueuedSuggestionState | null = null;
-	private shouldConsumeQueuedSuggestion = false;
+	private renderer: InlineEditRenderer;
 	private requestCounter = 0;
 	private latestRequestId = 0;
 	private inFlightRequest: {
@@ -357,8 +68,6 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 	 *  content is unchanged since the last invocation. Cleared on the first
 	 *  provider entry that consumes it. */
 	forceTriggerRequested = false;
-	private editableContextWindow: EditableContextWindow | null = null;
-	private pendingProposedJump: PendingProposedJump | null = null;
 	/** Cached diagnostics for the current document, refreshed on
 	 *  onDidChangeDiagnostics events. Avoids synchronous
 	 *  vscode.languages.getDiagnostics() which can block the extension
@@ -380,6 +89,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 	 * object is created on every request, losing the `retriggered` flag.
 	 */
 	private readonly retriggeredEditableWindows = new Set<string>();
+	private cursorHandler: CursorHandler;
 
 	constructor(
 		tracker: DocumentTracker,
@@ -389,6 +99,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		this.tracker = tracker;
 		this.jumpEditManager = jumpEditManager;
 		this.api = api;
+		this.cursorHandler = new CursorHandler(jumpEditManager);
 		// Forward streaming partial results to the status bar for progress feedback
 		api.onPartialResult = (text: string) => {
 			logger.trace("Streaming partial result chunk:", text.slice(-120));
@@ -538,7 +249,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 				if (!wasForceTriggered) {
 					this.cancelInFlightRequest("superseded by new request");
 				}
-				this.rememberEditableContextWindow(document, requestSnapshot);
+				this.cursorHandler.rememberEditableContextWindow(document, requestSnapshot);
 				controller = new AbortController();
 				logger.trace(`setupOriginate: before buildInput for req=${requestId}`);
 				input = this.buildInput(document, position, originalContent);
@@ -1155,279 +866,6 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		};
 		return enableForwardStability({ items: [item] });
 	}
-
-	private rememberEditableContextWindow(
-		document: vscode.TextDocument,
-		snapshot: Pick<RequestSnapshot, "uri" | "version" | "position">,
-	): void {
-		const format = detectModelFormat(config.modelName);
-		let startLine: number;
-		let endLine: number;
-		if (format === "zeta2" || format === "zeta2.1") {
-			const window = selectZetaCursorWindowFromLineProvider(
-				document.lineCount,
-				snapshot.position.line,
-				config.editableTokens,
-				config.zetaContextTokens,
-				(line) => document.lineAt(line).text,
-				config.syntaxAwareExpansion,
-			);
-			startLine = window.editableStart;
-			endLine = window.editableEnd;
-		} else {
-			const window = selectZetaCursorWindowFromLineProvider(
-				document.lineCount,
-				snapshot.position.line,
-				config.editableTokens,
-				config.zetaContextTokens,
-				(line) => document.lineAt(line).text,
-				config.syntaxAwareExpansion,
-			);
-			startLine = window.editableStart;
-			endLine = window.editableEnd;
-		}
-		if (endLine <= startLine) return;
-
-		this.clearEditableContextWindow();
-		this.editableContextWindow = {
-			uri: snapshot.uri,
-			version: snapshot.version,
-			startLine,
-			endLine,
-			anchorLine: snapshot.position.line,
-			retriggered: false,
-		};
-		logger.debug("Remembered editable context window", {
-			startLine,
-			endLine,
-			anchorLine: snapshot.position.line,
-			version: snapshot.version,
-		});
-	}
-
-	/**
-	 * VS Code's native proposed inline edit (isInlineEdit=true) does NOT
-	 * execute the item's command on acceptance, so cursor restoration
-	 * cannot rely on handleInlineAccept.  Instead, watch the document
-	 * change that the accept applies: when the version advances past the
-	 * suggested jump's armed version while the jump target line matches
-	 * the edit start, place the model's cursor marker after a tick.
-	 */
-	handleDocumentChangeForCursorRestore(event: vscode.TextDocumentChangeEvent): void {
-		const jump = this.pendingProposedJump;
-		if (!jump) return;
-		if (jump.cursorTargetOffset === undefined) return;
-		if (jump.startIndex === undefined) return;
-		const doc = event.document;
-		if (doc.uri.toString() !== jump.uri) return;
-		// The accept applies exactly one change that advances the version
-		// by one past what we saw when the suggestion was built.
-		if (doc.version !== jump.version + 1) return;
-		// Merge all contentChanges; native accept may split a large edit
-		// into multiple hunks (e.g. per line).  The union must exactly
-		// cover the armed edit range.
-		const startPos = doc.positionAt(jump.startIndex);
-		const endPos = jump.endIndex !== undefined ? doc.positionAt(jump.endIndex) : undefined;
-		if (endPos === undefined) return;
-		let unionStart = event.contentChanges[0]?.range.start;
-		let unionEnd = event.contentChanges[0]?.range.end;
-		for (const cc of event.contentChanges) {
-			if (cc.range.start.isBefore(unionStart)) unionStart = cc.range.start;
-			if (unionEnd.isBefore(cc.range.end)) unionEnd = cc.range.end;
-		}
-		if (!unionStart || !unionEnd) return;
-		const matchesEditRange =
-			unionStart.isEqual(startPos) && unionEnd.isEqual(endPos);
-		if (!matchesEditRange) return;
-
-		// Disarm first so a second change event cannot re-fire.
-		this.pendingProposedJump = null;
-		logger.debug("Native inline edit accepted; restoring model cursor", {
-			startIndex: jump.startIndex,
-			cursorTargetOffset: jump.cursorTargetOffset,
-			newVersion: doc.version,
-		});
-		setTimeout(() => {
-			const editor = vscode.window.activeTextEditor;
-			if (!editor || editor.document.uri.toString() !== jump.uri) {
-				return;
-			}
-			const targetOffset = Math.min(
-				jump.startIndex! + jump.cursorTargetOffset!,
-				editor.document.getText().length,
-			);
-			const target = editor.document.positionAt(Math.max(0, targetOffset));
-			editor.selection = new vscode.Selection(target, target);
-			editor.revealRange(
-				new vscode.Range(target, target),
-				vscode.TextEditorRevealType.InCenterIfOutsideViewport,
-			);
-			logger.debug("Cursor restored after native inline edit accept", {
-				line: target.line + 1,
-				character: target.character,
-			});
-		}, 0);
-	}
-
-	private maybeRetriggerAfterProposedJump(
-		document: vscode.TextDocument,
-		position: vscode.Position,
-	): boolean {
-		const jump = this.pendingProposedJump;
-		if (!jump) return false;
-		if (
-			jump.uri !== document.uri.toString() ||
-			jump.version !== document.version
-		) {
-			this.pendingProposedJump = null;
-			return false;
-		}
-		// The proposed-API "Tab to jump" landing point is normally the edit
-		// line, but VS Code can land one line before an insertion (the range's
-		// visual anchor). Treat either line as arrival. A strict target-line
-		// comparison loses the suggestion without ever requesting the next one.
-		const isAtJumpTarget =
-			position.line >= Math.max(0, jump.targetLine - 1) &&
-			position.line <= jump.targetLine;
-		if (!isAtJumpTarget) return false;
-		const landingLine = position.line;
-
-		// Native proposed inline edits use Tab/click to move to a distant edit.
-		// They do not apply the edit or necessarily re-invoke our provider at
-		// that target. Consume the one-shot watcher before scheduling so
-		// selection events cannot enqueue duplicate requests.
-		this.pendingProposedJump = null;
-		logger.debug("Proposed jump reached target; scheduling next edit", {
-			targetLine: jump.targetLine,
-			landingLine,
-			delayMs: JUMP_RETRIGGER_DELAY_MS,
-		});
-		setTimeout(() => {
-			const editor = vscode.window.activeTextEditor;
-			if (
-				!editor ||
-				editor.document.uri.toString() !== jump.uri ||
-				editor.document.version !== jump.version ||
-				editor.selection.active.line !== landingLine
-			) {
-				return;
-			}
-			logger.debug("Retriggering after proposed jump", {
-				targetLine: jump.targetLine,
-				landingLine,
-			});
-			void vscode.commands.executeCommand(
-				"editor.action.inlineSuggest.trigger",
-			);
-		}, JUMP_RETRIGGER_DELAY_MS);
-		return true;
-	}
-
-	private maybeRetriggerOnEditableContextExit(
-		document: vscode.TextDocument,
-		position: vscode.Position,
-	): void {
-		const window = this.editableContextWindow;
-		const anchor = {
-			uri: document.uri.toString(),
-			version: document.version,
-			position,
-		};
-		if (!window) {
-			if (config.retriggerOnContextExit) {
-				this.rememberEditableContextWindow(document, anchor);
-			}
-			return;
-		}
-		if (window.uri !== anchor.uri || window.version !== anchor.version) {
-			this.clearEditableContextWindow();
-			if (config.retriggerOnContextExit) {
-				this.rememberEditableContextWindow(document, anchor);
-			}
-			return;
-		}
-
-		const retriggerDistance = Math.max(
-			1,
-			Math.ceil((window.endLine - window.startLine) / 2),
-		);
-		const movedLines = Math.abs(position.line - window.anchorLine);
-		if (movedLines < retriggerDistance) {
-			if (window.timer) {
-				clearTimeout(window.timer);
-				delete window.timer;
-			}
-			return;
-		}
-		if (!config.retriggerOnContextExit) return;
-		const windowKey = `${window.uri}:${window.version}`;
-		if (this.retriggeredEditableWindows.has(windowKey)) return;
-
-		if (window.timer) clearTimeout(window.timer);
-		logger.debug("Cursor crossed editable-context retrigger threshold", {
-			startLine: window.startLine,
-			endLine: window.endLine,
-			anchorLine: window.anchorLine,
-			currentLine: position.line,
-			movedLines,
-			retriggerDistance,
-			debounceMs: config.contextExitRetriggerDebounceMs,
-		});
-		window.timer = setTimeout(() => {
-			if (this.editableContextWindow !== window) return;
-			delete window.timer;
-
-			const editor = vscode.window.activeTextEditor;
-			if (
-				!editor ||
-				editor.document.uri.toString() !== window.uri ||
-				editor.document.version !== window.version
-			) {
-				this.clearEditableContextWindow();
-				return;
-			}
-			const currentLine = editor.selection.active.line;
-			const retriggerDistance = Math.max(
-				1,
-				Math.ceil((window.endLine - window.startLine) / 2),
-			);
-			const movedLines = Math.abs(currentLine - window.anchorLine);
-			if (movedLines < retriggerDistance) return;
-
-			window.retriggered = true;
-			this.retriggeredEditableWindows.add(windowKey);
-			// Bound the set: per-session versions grow monotonically. When it
-			// exceeds the cap, clear it entirely — the threshold check + debounce
-			// still gate retriggers, so this only loosens the once-per-version
-			// guard, never re-enables the old infinite loop.
-			if (this.retriggeredEditableWindows.size > 128) {
-				this.retriggeredEditableWindows.clear();
-			}
-			logger.debug(
-				"Retriggering after cursor crossed editable-context threshold",
-				{
-					startLine: window.startLine,
-					endLine: window.endLine,
-					anchorLine: window.anchorLine,
-					currentLine,
-					movedLines,
-					retriggerDistance,
-					debounceMs: config.contextExitRetriggerDebounceMs,
-				},
-			);
-			void vscode.commands.executeCommand(
-				"editor.action.inlineSuggest.trigger",
-			);
-		}, config.contextExitRetriggerDebounceMs);
-	}
-
-	private clearEditableContextWindow(): void {
-		if (this.editableContextWindow?.timer) {
-			clearTimeout(this.editableContextWindow.timer);
-		}
-		this.editableContextWindow = null;
-	}
-
 	async handleCursorMove(
 		document: vscode.TextDocument,
 		position: vscode.Position,

@@ -373,6 +373,12 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 	});
 	/** Tracks typing cadence to adjust debounce dynamically */
 	private readonly debounceTracker = new DynamicDebounceTracker();
+	/**
+	 * Set of `uri:version` keys that have already been retriggered.
+	 * Prevents the retrigger-on-context-exit loop where a new EditableWindow
+	 * object is created on every request, losing the `retriggered` flag.
+	 */
+	private readonly retriggeredEditableWindows = new Set<string>();
 
 	constructor(
 		tracker: DocumentTracker,
@@ -1336,7 +1342,9 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 			}
 			return;
 		}
-		if (!config.retriggerOnContextExit || window.retriggered) return;
+		if (!config.retriggerOnContextExit) return;
+		const windowKey = `${window.uri}:${window.version}`;
+		if (this.retriggeredEditableWindows.has(windowKey)) return;
 
 		if (window.timer) clearTimeout(window.timer);
 		logger.debug("Cursor crossed editable-context retrigger threshold", {
@@ -1370,6 +1378,14 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 			if (movedLines < retriggerDistance) return;
 
 			window.retriggered = true;
+			this.retriggeredEditableWindows.add(windowKey);
+			// Bound the set: per-session versions grow monotonically. When it
+			// exceeds the cap, clear it entirely — the threshold check + debounce
+			// still gate retriggers, so this only loosens the once-per-version
+			// guard, never re-enables the old infinite loop.
+			if (this.retriggeredEditableWindows.size > 128) {
+				this.retriggeredEditableWindows.clear();
+			}
 			logger.debug(
 				"Retriggering after cursor crossed editable-context threshold",
 				{

@@ -12,6 +12,7 @@ import { SuggestionCache } from "~/editor/suggestion-cache.ts";
 import {
 	enableForwardStability,
 	markAsProposedInlineEdit,
+	INLINE_COMPLETION_DISPLAY_LOCATION_KIND,
 	type ProposedInlineCompletionDisplayLocation,
 } from "~/editor/proposed-inline-edit.ts";
 import {
@@ -1130,17 +1131,16 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		if (useProposedInlineEditPresentation) {
 			// VS Code's custom inline-edit build derives the ghost-text hint
 			// anchor from `displayLocation`. Without it the hint is `void 0`
-			// and the inline edit is created but never rendered. Default to
-			// the edit start anchor with a Code-style label; callers can
-			// override with their own displayLocation.
+			// and the inline edit is silently skipped. Use a Label-style hint
+			// with the extension name so it renders correctly.
 			const proposedOptions: Parameters<typeof markAsProposedInlineEdit>[1] = {
 				correlationId: result.id,
 				showRange: editRange,
 				displayLocation:
 					options.displayLocation ?? {
 						range: new vscode.Range(startPosition, startPosition),
-						kind: 1,
-						label: "",
+						kind: INLINE_COMPLETION_DISPLAY_LOCATION_KIND.Label,
+						label: "Zeta",
 					},
 			};
 			markAsProposedInlineEdit(item, proposedOptions);

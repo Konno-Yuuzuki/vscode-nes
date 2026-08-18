@@ -163,37 +163,6 @@ export class SweepConfig {
 			);
 		}
 
-		// P2: enable syntax-aware editable-window expansion (approximates
-		// syntax boundaries via bracket depth, no tree-sitter needed).
-		get syntaxAwareExpansion(): boolean {
-			return this.config.get<boolean>("syntaxAwareExpansion", true);
-		}
-
-		// P3 A: cursor-move-back re-show threshold in lines (fixed policy).
-		get suggestionCacheThreshold(): number {
-			return Math.max(
-				1,
-				this.nonNegativeInteger("suggestionCacheThreshold", 3),
-			);
-		}
-
-		// P3 C: use the edit's line range (plus margin) to decide re-show
-		// eligibility instead of the fixed cursor threshold.
-		get useEditRangeForCache(): boolean {
-			return this.config.get<boolean>("useEditRangeForCache", true);
-		}
-
-		// Extra lines added around the edit range for re-show eligibility.
-		get editRangeMargin(): number {
-			return Math.max(0, this.nonNegativeInteger("editRangeMargin", 3));
-		}
-
-		// P3 B: skip the next input debounce right after a suggestion accept so
-		// the follow-up prediction arrives faster.
-		get skipDebounceOnAccept(): boolean {
-			return this.config.get<boolean>("skipDebounceOnAccept", true);
-		}
-
 		get rulesMaxChars(): number {
 		return this.config.get<number>("rulesMaxChars", DEFAULT_RULES_MAX_CHARS);
 	}

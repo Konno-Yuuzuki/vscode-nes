@@ -103,11 +103,11 @@ export class SweepConfig {
 	}
 
 	get useCopilotStyleNextEditPresentation(): boolean {
-			return this.config.get<boolean>(
-				"useCopilotStyleNextEditPresentation",
-				false,
-			);
-		}
+		return this.config.get<boolean>(
+			"useCopilotStyleNextEditPresentation",
+			true,
+		);
+	}
 
 	get serverUrl(): string {
 		return this.config.get<string>("serverUrl", DEFAULT_SERVER_URL);

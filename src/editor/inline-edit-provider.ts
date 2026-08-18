@@ -1106,11 +1106,10 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		if (useProposedInlineEditPresentation) {
 			const proposedOptions: Parameters<typeof markAsProposedInlineEdit>[1] = {
 				correlationId: result.id,
-				showRange: editRange,
 			};
-			if (options.displayLocation) {
-				proposedOptions.displayLocation = options.displayLocation;
-			}
+			// Copilot NES style: do NOT set showRange or displayLocation
+			// for regular edits. Only pass correlationId so the workbench
+			// renders the gutter arrow + hover menu.
 			markAsProposedInlineEdit(item, proposedOptions);
 		}
 

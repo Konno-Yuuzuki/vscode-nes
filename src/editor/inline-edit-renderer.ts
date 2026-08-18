@@ -4,10 +4,9 @@ import { config } from "~/core/config";
 import { logger } from "~/core/logger.ts";
 import type { JumpEditManager } from "~/editor/jump-edit-manager.ts";
 import { SuggestionCache } from "~/editor/suggestion-cache.ts";
+import { toInlineSuggestion } from "~/editor/inline-suggestion.ts";
 import {
 	enableForwardStability,
-	markAsProposedInlineEdit,
-	INLINE_COMPLETION_DISPLAY_LOCATION_KIND,
 	type ProposedInlineCompletionDisplayLocation,
 } from "~/editor/proposed-inline-edit.ts";
 
@@ -60,7 +59,7 @@ function toSnippetWithCursor(
 	completion: string,
 	cursorOffset: number,
 ): vscode.SnippetString {
-	const escapeSnippet = (s: string) => s.replace(/[\\\\$}]/g, "\\$&");
+	const escapeSnippet = (s: string) => s.replace(/[\\$}]/g, "\\$&");
 	const before = escapeSnippet(completion.slice(0, cursorOffset));
 	const after = escapeSnippet(completion.slice(cursorOffset));
 	return new vscode.SnippetString(`${before}$0${after}`);
@@ -348,6 +347,20 @@ export class InlineEditRenderer {
 			options.useProposedInlineEditPresentation &&
 			config.useCopilotStyleNextEditPresentation;
 
+		// Determine if this edit can be rendered as ghost text (single-line,
+		// cursor on same line) or needs to be rendered as an inline edit
+		// (NES-style gutter arrow + hover menu).  Copilot's toInlineSuggestion
+		// returns undefined for multi-line edits and edits before the cursor.
+		// When it returns a valid edit, use its adjusted range and text.
+		const inlineSuggestion = useProposedInlineEditPresentation
+			? toInlineSuggestion(position, document, editRange, result.completion)
+			: undefined;
+		const isNES = useProposedInlineEditPresentation && !inlineSuggestion;
+		// Use the adjusted range/text from toInlineSuggestion for ghost text,
+		// or the original editRange/completion for NES.
+		const ghostRange = inlineSuggestion?.range ?? editRange;
+		const ghostText = inlineSuggestion?.newText ?? result.completion;
+
 		if (result.startIndex < cursorOffset && !useProposedInlineEditPresentation) {
 			logger.debug(
 				"Edit before cursor cannot be shown as ghost text; falling back to jump edit",
@@ -376,12 +389,7 @@ export class InlineEditRenderer {
 				? { cursorTargetOffset: result.cursorTargetOffset }
 				: {}),
 		};
-		const insertText =
-			result.cursorTargetOffset !== undefined &&
-			!useProposedInlineEditPresentation
-				? toSnippetWithCursor(result.completion, result.cursorTargetOffset)
-				: result.completion;
-		const item = new vscode.InlineCompletionItem(insertText, editRange);
+		const item = new vscode.InlineCompletionItem(ghostText, ghostRange);
 		if (
 			useProposedInlineEditPresentation &&
 			startPosition.line !== position.line
@@ -407,7 +415,7 @@ export class InlineEditRenderer {
 		} else {
 			this.pendingProposedJump = null;
 		}
-		const replacedText = document.getText(editRange);
+		const replacedText = document.getText(ghostRange);
 		if (replacedText && !result.completion.startsWith(replacedText)) {
 			item.filterText = replacedText;
 		}
@@ -417,21 +425,17 @@ export class InlineEditRenderer {
 			arguments: [acceptedSuggestion],
 		};
 		if (useProposedInlineEditPresentation) {
-			// VS Code's custom inline-edit build derives the ghost-text hint
-			// anchor from `displayLocation`. Without it the hint is `void 0`
-			// and the inline edit is silently skipped. Use a Label-style hint
-			// with the extension name so it renders correctly.
-			const proposedOptions: Parameters<typeof markAsProposedInlineEdit>[1] = {
-				correlationId: result.id,
-				showRange: editRange,
-				displayLocation:
-					options.displayLocation ?? {
-						range: new vscode.Range(startPosition, startPosition),
-						kind: INLINE_COMPLETION_DISPLAY_LOCATION_KIND.Label,
-						label: "Zeta",
-					},
-			};
-			markAsProposedInlineEdit(item, proposedOptions);
+			if (isNES) {
+				// NES mode: the edit can't be rendered as ghost text.
+				// Fall back to the jump-edit decoration (decorative overlay)
+				// instead of isInlineEdit, because the VS Code extension
+				// host's _isAdditionsProposedApiEnabled gate may prevent
+				// isInlineEdit from being passed through on custom builds.
+				this.jumpEditManager.setPendingJumpEdit(document, result);
+				return undefined;
+			}
+			// For ghost-text (single-line) edits, the workbench renders
+			// normal ghost text without any proposed API properties.
 		}
 
 		this.lastInlineEdit = {

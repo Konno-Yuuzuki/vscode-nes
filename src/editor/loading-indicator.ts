@@ -87,11 +87,14 @@ export class LoadingIndicatorDecoration implements vscode.Disposable {
 	}
 
 	private showFrame(frame: number): void {
-		const editor = vscode.window.activeTextEditor;
-		if (!editor) return;
+			const editor = vscode.window.activeTextEditor;
+			if (!editor) return;
 
-		const cursorLine = editor.selection.active.line;
-		const range = new vscode.Range(cursorLine, 0, cursorLine, 0);
+			const cursorLine = editor.selection.active.line;
+			// Place the decoration at the end of the cursor line so the
+			// " ◐ Zeta" tag appears after the code, not at column 0.
+			const lineLength = editor.document.lineAt(cursorLine).text.length;
+			const range = new vscode.Range(cursorLine, lineLength, cursorLine, lineLength);
 
 		for (let i = 0; i < this.frameDecorations.length; i++) {
 			editor.setDecorations(

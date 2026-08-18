@@ -301,9 +301,14 @@ export function activate(context: vscode.ExtensionContext) {
 
 	const acceptJumpEditCommand = vscode.commands.registerCommand(
 		"zeta.acceptJumpEdit",
-		() => jumpEditManager.acceptJumpEdit(),
+		() => {
+			jumpEditManager.acceptJumpEdit();
+			// After accepting via the decoration path, trigger the next
+			// prediction (handleInlineAccept reads lastInlineEdit for the
+			// suggestion details, so no arguments needed).
+			provider.handleInlineAccept();
+		},
 	);
-
 	const acceptJumpEditLineCommand = vscode.commands.registerCommand(
 		"zeta.acceptJumpEditLine",
 		() => jumpEditManager.acceptJumpEditLine(),

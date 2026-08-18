@@ -7,6 +7,7 @@ import { config } from "~/core/config";
 import { JUMP_RETRIGGER_DELAY_MS } from "~/core/constants.ts";
 import { logger } from "~/core/logger.ts";
 import type { JumpEditManager } from "~/editor/jump-edit-manager.ts";
+import { toInlineSuggestion } from "~/editor/inline-suggestion.ts";
 import { DynamicDebounceTracker } from "~/editor/dynamic-debounce.ts";
 import { SuggestionCache } from "~/editor/suggestion-cache.ts";
 import {
@@ -1035,6 +1036,15 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 			options.useProposedInlineEditPresentation &&
 			config.useCopilotStyleNextEditPresentation;
 
+		// Official Copilot logic (inlineCompletionProvider.ts): use
+		// toInlineSuggestion to decide if the edit can render as ghost text
+		// at the cursor. If yes → isInlineCompletion (ghost text, isInlineEdit
+		// stays false). If no → NES mode (isInlineEdit = true, gutter arrow).
+		const inlineSuggestion = useProposedInlineEditPresentation
+			? toInlineSuggestion(position, document, editRange, result.completion)
+			: undefined;
+		const isInlineCompletion = inlineSuggestion !== undefined;
+
 		if (result.startIndex < cursorOffset && !useProposedInlineEditPresentation) {
 			logger.debug(
 				"Edit before cursor cannot be shown as ghost text; falling back to jump edit",
@@ -1063,12 +1073,16 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 				? { cursorTargetOffset: result.cursorTargetOffset }
 				: {}),
 		};
+		// Official behavior: use the adjusted range/text from toInlineSuggestion
+		// when it exists (ghost text), else the raw edit range/text (NES).
+		const ghostRange = inlineSuggestion?.range ?? editRange;
+		const ghostText = inlineSuggestion?.newText ?? result.completion;
 		const insertText =
 			result.cursorTargetOffset !== undefined &&
 			!useProposedInlineEditPresentation
 				? toSnippetWithCursor(result.completion, result.cursorTargetOffset)
-				: result.completion;
-		const item = new vscode.InlineCompletionItem(insertText, editRange);
+				: ghostText;
+		const item = new vscode.InlineCompletionItem(insertText, ghostRange);
 		if (
 			useProposedInlineEditPresentation &&
 			startPosition.line !== position.line
@@ -1103,14 +1117,32 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 			command: "zeta.acceptInlineEdit",
 			arguments: [acceptedSuggestion],
 		};
+		// Official Copilot logic (inlineCompletionProvider.ts L507-518):
+		// - isInlineEdit = !isInlineCompletion  → NES (multi-line) → true
+		// - showInlineEditMenu = true          → NES → true
+		// - correlationId always set
+		// - action = gutter menu link (always set)
+		// - NO showRange, NO displayLocation for regular edits
 		if (useProposedInlineEditPresentation) {
-			const proposedOptions: Parameters<typeof markAsProposedInlineEdit>[1] = {
-				correlationId: result.id,
+			const proposed = item as {
+				correlationId?: string;
+				action?: vscode.Command;
+				isInlineEdit?: boolean;
+				showInlineEditMenu?: boolean;
 			};
-			// Copilot NES style: do NOT set showRange or displayLocation
-			// for regular edits. Only pass correlationId so the workbench
-			// renders the gutter arrow + hover menu.
-			markAsProposedInlineEdit(item, proposedOptions);
+			proposed.correlationId = result.id;
+			// Gutter menu link action (Copilot uses learnMoreAction here).
+			proposed.action = {
+				title: "Zeta",
+				command: "zeta.acceptInlineEdit",
+				arguments: [acceptedSuggestion],
+			};
+			// Only NES edits (not renderable as ghost text) get
+			// isInlineEdit=true + showInlineEditMenu=true.
+			if (!isInlineCompletion) {
+				proposed.isInlineEdit = true;
+				proposed.showInlineEditMenu = true;
+			}
 		}
 
 		this.lastInlineEdit = {

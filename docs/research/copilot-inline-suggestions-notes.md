@@ -1,6 +1,7 @@
 # 核心资料笔记 — Copilot Inline Suggestions / NES 渲染研究
 
 > 2026-08-18
+> 相关文档: 官方 vs Zeta 实现对照 — `docs/research/implementation-comparison.md`
 
 ## 1. VS Code Proposed API 定义（vscode.proposed.d.ts）✅ 已获取
 
@@ -255,3 +256,23 @@ nextEditProvider 产出 NextEditResult（edit + 可选 displayLocation/action/ju
 ```
 
 **这就是 Zeta 需要的完整渲染决策链。**
+
+---
+
+## 9. build.70 应用结论（2026-08-18）
+
+Zeta 已按官方逻辑实现（详见 `docs/research/implementation-comparison.md`）：
+
+| 官方概念 | Zeta 状态 |
+|----------|-----------|
+| `toInlineSuggestion` 4 步算法 | ✅ 完整移植到 `inline-suggestion.ts`（官方版含 `tryRebaseAsCursorEdit`，比 smallmain 版更完整） |
+| `isInlineCompletion` 判断 | ✅ buildCompletionItem 局部变量 |
+| `isInlineEdit = !isInlineCompletion` | ✅ 仅 NES 设 true |
+| `showInlineEditMenu` | ✅ NES 设 true（无 unification 开关的等价简化） |
+| `displayLocation` / `showRange` | ✅ 普通编辑不设（官方行为） |
+| `action`（gutter 菜单） | ✅ `zeta.acceptInlineEdit`（⚠️ 待验证 VS Code 是否执行） |
+
+**关键教训**（历史回退记录）：
+- build.54-65 失败原因：设 `showRange`/`displayLocation` 或依赖 decoration，与官方行为不符
+- 官方普通 NES 编辑只设：`isInlineEdit` + `showInlineEditMenu` + `correlationId` + `action`
+- `isInlineEdit` 必须 = `!isInlineCompletion`（不能所有编辑都设 true）

@@ -1,17 +1,19 @@
 # Zeta - Edit Prediction 功能列表
 
 > 最后更新: 2026-08-18
-> 版本: 1.2.8-build.69
+> 版本: 1.2.8-build.70
 
 ---
 
-## 核心渲染
+## 核心渲染（官方 Copilot 逻辑，build.70）
 
 | 功能 | 渲染方式 | 状态 |
 |------|----------|------|
-| Copilot 风格 inline edit | `isInlineEdit=true` + `showInlineEditMenu` + `correlationId` → NES gutter 箭头 + hover 菜单 | ✅ 工作 |
-| INLINE 单行编辑 | 标准 `InlineCompletionItem` → 灰色 ghost text | ✅ 正常 |
-| JUMP 多行编辑（装饰器回退） | `jumpEditManager.setPendingJumpEdit()` → SVG 装饰器框 | ⚠️ 备选方案，SVG 渲染异常 |
+| NES 多行编辑 | `isInlineEdit=true` + `showInlineEditMenu` + `correlationId` + `action` → gutter 箭头 + hover 菜单 | ✅ 按官方实现 |
+| INLINE 单行编辑 | `toInlineSuggestion` 返回有效 → ghost text（`isInlineEdit=false`） | ✅ 正常 |
+| 渲染决策 | 官方 4 步算法：同行验证 → rebase 光标编辑 → 下一行插入 → NES | ✅ 已实现 |
+| 跨文件编辑 | `uri` + `displayLocation(kind: Label)` | ⏳ 未实现（Zeta 暂无跨文件建议） |
+| JUMP 装饰器回退 | `jumpEditManager.setPendingJumpEdit()` → SVG 装饰器框 | ⚠️ 备选，SVG 渲染异常 |
 
 ## 加载指示器
 
@@ -83,6 +85,5 @@
 
 | 功能 | 原因 |
 |------|------|
-| 自定义 JUMP 装饰器 SVG（主方案） | SVG 渲染异常，改用 native `isInlineEdit` + NES gutter 箭头 |
-| `toInlineSuggestion` 判断算法 | 不再需要 |
-| `displayLocation` hint 指示器 | 不再需要 |
+| 自定义 JUMP 装饰器 SVG（主方案） | SVG 渲染异常，改用官方 `isInlineEdit` + NES gutter 箭头 |
+| `displayLocation` hint 指示器 | 官方仅诊断/跨文件场景使用，普通编辑不需要 |

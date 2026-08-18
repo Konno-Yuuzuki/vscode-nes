@@ -125,6 +125,7 @@ const V0318_MAX_BLOCK_LINES = 16;
 const MAX_NUDGE_LINES = 5;
 
 export interface Zeta2PromptOptions {
+	includeDiagnostics: boolean;
 	diagRadius: number;
 	rules: string;
 	// Single-line comment prefix for the document's language. See sweep-
@@ -155,6 +156,7 @@ export interface Zeta2PromptOptions {
 }
 
 const DEFAULT_OPTIONS: Zeta2PromptOptions = {
+	includeDiagnostics: false,
 	diagRadius: 12,
 	rules: "",
 	commentPrefix: "//",
@@ -483,17 +485,14 @@ export function buildZeta2Prompt(
 	const editHistory = req.recent_changes.trim();
 	const editHistoryText =
 		editHistory === "" ? "" : `${FILE_MARKER}edit_history\n${editHistory}\n\n`;
-	const diagnosticsText = opts.injectInlineDiagnostics
-		? ""
-		: formatDiagnosticsPseudoFile(
-				promptDiagnostics,
-				cursorLine + 1,
-				opts.diagRadius,
-				opts.commentPrefix,
-				lines,
-				lineOffsets,
-				opts.messageTransforms,
-			);
+	const diagnosticsText = opts.injectInlineDiagnostics || !opts.includeDiagnostics
+			? ""
+			: formatDiagnosticsPseudoFile(
+					promptDiagnostics,
+					cursorLine + 1,
+					opts.diagRadius,
+					opts.commentPrefix,
+				);
 
 	if (editHistoryText !== "") {
 		contextStats.editHistory = editHistory.length;
@@ -965,9 +964,6 @@ function formatDiagnosticsPseudoFile(
 	cursorLine1: number,
 	diagRadius: number,
 	commentPrefix: string,
-	lines: string[],
-	lineOffsets: number[],
-	messageTransforms: MessageTransform[],
 ): string {
 	if (diagnostics.length === 0) return "";
 
@@ -981,9 +977,8 @@ function formatDiagnosticsPseudoFile(
 	const body = renderDiagnosticsAsComments(
 		limited,
 		commentPrefix,
-		lines,
-		lineOffsets,
-		messageTransforms,
+		"//",
+		0,
 	);
 	return `${FILE_MARKER}diagnostics\n${body}\n`;
 }

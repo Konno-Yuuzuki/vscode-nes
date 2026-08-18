@@ -287,8 +287,9 @@ describe("buildZeta2Prompt", () => {
 			],
 		});
 		const result = buildZeta2Prompt(request, {
-			protocolVersion: "2.1",
-		});
+					protocolVersion: "2.1",
+					includeDiagnostics: true,
+				});
 		const zeta = result.prompt.indexOf("<filename>src/zeta.ts");
 		const alpha = result.prompt.indexOf("<filename>src/alpha.ts");
 		const history = result.prompt.indexOf("<filename>edit_history");

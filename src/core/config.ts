@@ -212,6 +212,10 @@ export class SweepConfig {
 		return this.config.get<boolean>("injectInlineDiagnostics", false);
 	}
 
+
+	get includeDiagnostics(): boolean {
+		return this.config.get<boolean>("includeDiagnostics", false);
+	}
 	// Marker text inserted between the language's comment prefix and the
 	// diagnostic message in the inline-injection format, e.g. for
 	// `// BUG: LSP error here (code: …) - <msg>` the marker is

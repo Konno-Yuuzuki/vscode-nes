@@ -2,7 +2,7 @@
 	"name": "zeta-edit-prediction",
 	"displayName": "Zeta - Edit Prediction",
 	"description": "Next Edit Autocomplete using Zeta Model",
-	"version": "1.2.8-build.70",
+	"version": "1.2.8-build.73",
 	"publisher": "Yuuzuki",
 	"author": {
 		"name": "Yuuzuki"
@@ -381,8 +381,13 @@
 						"order": 10,
 						"markdownDescription": "%zeta.injectInlineDiagnostics.description%"
 					},
+					"zeta.includeDiagnostics": {
+						"type": "boolean",
+						"default": false,
+						"order": 11,
+						"markdownDescription": "%zeta.includeDiagnostics.description%"
+					},
 					"zeta.inlineDiagnosticsMarker": {
-						"type": "string",
 						"default": "BUG: LSP error here",
 						"order": 20,
 						"markdownDescription": "%zeta.inlineDiagnosticsMarker.description%"

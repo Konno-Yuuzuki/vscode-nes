@@ -805,6 +805,10 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 						logger.info("Edit classified as proposed VS Code inline edit", {
 							id: jumpResult.id,
 						});
+						// Dual-render: also set the decoration so the edit is
+						// visible even when the proposed API gate is not enabled
+						// by the custom VS Code build.
+						this.jumpEditManager.setPendingJumpEdit(document, jumpResult);
 						return proposedInlineEdit;
 					}
 				}
@@ -1496,31 +1500,40 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 	}
 
 	handleInlineAccept(acceptedSuggestion?: AcceptedInlineSuggestion): void {
-			// Invalidate cache: the accepted suggestion is no longer relevant
-			if (acceptedSuggestion?.uri) {
-				this.suggestionCache.invalidate(acceptedSuggestion.uri);
-			}
-			// P3 B: skip the next debounce so the follow-up prediction arrives
-			// faster after the user accepts a suggestion.
-			if (config.skipDebounceOnAccept) {
-				this.lastRequestTimestamp = 0;
-			}
-			if (
-			acceptedSuggestion &&
-			this.lastInlineEdit?.suggestion.id === acceptedSuggestion.id
-		) {
+		// Fall back to lastInlineEdit if no suggestion passed (e.g. NES accept
+		// path where item.command is not executed by VS Code's inlineEdit.accept).
+		const suggestion = acceptedSuggestion ?? this.lastInlineEdit?.suggestion;
+
+		// Invalidate cache: the accepted suggestion is no longer relevant
+		if (suggestion?.uri) {
+			this.suggestionCache.invalidate(suggestion.uri);
+		}
+		// P3 B: skip the next debounce so the follow-up prediction arrives
+		// faster after the user accepts a suggestion.
+		if (config.skipDebounceOnAccept) {
+			this.lastRequestTimestamp = 0;
+		}
+		// Clear lastInlineEdit when the suggestion matches
+		if (suggestion && this.lastInlineEdit?.suggestion.id === suggestion.id) {
 			this.lastInlineEdit = null;
 		}
-		if (!acceptedSuggestion) return;
+
+		// Without any suggestion information, we can still trigger the next
+		// prediction — the request will be based on the current document state.
+		if (!suggestion) {
+			void vscode.commands.executeCommand("editor.action.inlineSuggest.trigger");
+			return;
+		}
+
 		// VS Code's proposed inline edit (isInlineEdit=true) accept path may
 		// set its own default cursor position (edit range start / end) after
 		// the item.command runs, overwriting our restore.  Deferring the
 		// model-cursor placement to the next macrotask lets VS Code finish
 		// its own post-accept cursor handling first so ours is not lost.
 		setTimeout(() => {
-			this.placeCursorAfterPlainTextAccept(acceptedSuggestion);
+			this.placeCursorAfterPlainTextAccept(suggestion);
 		}, 0);
-		this.adjustQueuedSuggestionsAfterAccept(acceptedSuggestion);
+		this.adjustQueuedSuggestionsAfterAccept(suggestion);
 		if (this.queuedSuggestions?.suggestions.length) {
 			this.shouldConsumeQueuedSuggestion = true;
 			void vscode.commands.executeCommand(

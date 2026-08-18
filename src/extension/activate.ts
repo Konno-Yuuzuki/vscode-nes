@@ -346,13 +346,19 @@ export function activate(context: vscode.ExtensionContext) {
 				() => {
 					// Try VS Code's native inline edit accept command first.
 					// If it's not available (custom build), fall back to manual.
+					// After accept, always trigger the next prediction via
+					// handleInlineAccept (which reads lastInlineEdit for the
+					// suggestion details, so no arguments needed).
 					void vscode.commands
 						.executeCommand("editor.action.inlineEdit.accept")
 						.then(
-							() => {},
+							() => {
+								provider.handleInlineAccept();
+							},
 							() => {
 								// Fallback: apply the edit manually
 								provider.acceptCurrentInlineEdit();
+								provider.handleInlineAccept();
 							},
 						);
 				},

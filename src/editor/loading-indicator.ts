@@ -14,7 +14,7 @@ import type { ApiClient } from "~/api/client.ts";
  * to convey activity without distracting.
  */
 
-const LOADING_FRAMES = ["⟳", "⟲"];
+const LOADING_FRAMES = ["◐", "◓", "◑", "◒"];
 const LOADING_FRAME_MS = 250;
 
 export class LoadingIndicatorDecoration implements vscode.Disposable {

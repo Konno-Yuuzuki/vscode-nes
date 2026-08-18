@@ -7,6 +7,8 @@ import { config } from "~/core/config";
 import { JUMP_RETRIGGER_DELAY_MS } from "~/core/constants.ts";
 import { logger } from "~/core/logger.ts";
 import type { JumpEditManager } from "~/editor/jump-edit-manager.ts";
+import { DynamicDebounceTracker } from "~/editor/dynamic-debounce.ts";
+import { SuggestionCache } from "~/editor/suggestion-cache.ts";
 import {
 	enableForwardStability,
 	markAsProposedInlineEdit,
@@ -362,7 +364,13 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 	 *  host when the language server is busy (e.g. rust-analyzer first
 	 *  indexing). */
 	private cachedDiagnostics: vscode.Diagnostic[] = [];
-	private cachedDiagnosticsUri: string | null = null;
+		private cachedDiagnosticsUri: string | null = null;
+		private readonly suggestionCache = new SuggestionCache({
+			cursorThreshold: config.suggestionCacheThreshold,
+			useEditRange: config.useEditRangeForCache,
+			editRangeMargin: config.editRangeMargin,
+		});
+		private readonly debounceTracker = new DynamicDebounceTracker();
 
 	constructor(
 		tracker: DocumentTracker,
@@ -445,13 +453,36 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 			context.triggerKind === vscode.InlineCompletionTriggerKind.Invoke ||
 			this.forceTriggerRequested;
 		if (
-			this.forceTriggerRequested !== true &&
-			this.lastContent !== null &&
-			currentContent === this.lastContent &&
-			!isManualInvoke
-		) {
-			return undefined;
-		}
+					this.forceTriggerRequested !== true &&
+					this.lastContent !== null &&
+					currentContent === this.lastContent &&
+					!isManualInvoke
+				) {
+					// Cursor-move-back: if content hasn't changed but the cursor
+					// returned within the cache threshold (±3 lines) of a previously
+					// suggested edit, re-show it instantly without a new request.
+					const cached = this.suggestionCache.get(
+						uri,
+						position.line,
+						currentContent,
+						document.version,
+					);
+					if (cached?.length) {
+						logger.debug(
+							`Returning cached suggestion for cursor-move-back req=${requestId} line=${position.line}`,
+						);
+						return this.buildCompletionItem(
+							document,
+							position,
+							cached[0],
+							{
+								useProposedInlineEditPresentation:
+									config.useCopilotStyleNextEditPresentation,
+							},
+						);
+					}
+					return undefined;
+				}
 		const wasForceTriggered = this.forceTriggerRequested;
 		this.forceTriggerRequested = false;
 		this.lastContent = currentContent;
@@ -600,10 +631,27 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 			}
 
 			if (config.useCopilotStyleNextEditPresentation) {
-				results = results.flatMap((result) =>
-					splitDisjointLineEdits(document.getText(), result),
-				);
-			}
+							results = results.flatMap((result) =>
+								splitDisjointLineEdits(document.getText(), result),
+							);
+						}
+
+						// Store valid results in the suggestion cache so cursor-move-back
+						// can re-show them without a new request.
+						if (results?.length) {
+							const first = results[0];
+							this.suggestionCache.store(
+								uri,
+								results,
+								requestSnapshot.position.line,
+								currentContent,
+								document.version,
+								{
+									startLine: document.positionAt(first.startIndex).line,
+									endLine: document.positionAt(first.endIndex).line,
+								},
+							);
+						}
 
 			if (
 				isOwnRequest &&
@@ -916,14 +964,18 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 	}
 
 	private async waitForDebounce(
-		requestId: number,
-		token: vscode.CancellationToken,
-	): Promise<boolean> {
-		const now = Date.now();
-		const elapsed = now - this.lastRequestTimestamp;
-		this.lastRequestTimestamp = now;
+			requestId: number,
+			token: vscode.CancellationToken,
+		): Promise<boolean> {
+			const now = Date.now();
+			const elapsed = now - this.lastRequestTimestamp;
+			this.lastRequestTimestamp = now;
 
-		const delay = Math.max(0, INLINE_REQUEST_DEBOUNCE_MS - elapsed);
+			const dynamicDebounceMs = this.debounceTracker.computeDebounceMs(
+				elapsed,
+				now,
+			);
+			const delay = Math.max(0, dynamicDebounceMs - elapsed);
 		logger.trace(
 			`waitForDebounce req=${requestId} elapsed=${elapsed} delay=${delay} tokenCancelled=${token.isCancellationRequested} isLatest=${this.isLatestRequest(requestId)}`,
 		);
@@ -1413,7 +1465,16 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 	}
 
 	handleInlineAccept(acceptedSuggestion?: AcceptedInlineSuggestion): void {
-		if (
+			// Invalidate cache: the accepted suggestion is no longer relevant
+			if (acceptedSuggestion?.uri) {
+				this.suggestionCache.invalidate(acceptedSuggestion.uri);
+			}
+			// P3 B: skip the next debounce so the follow-up prediction arrives
+			// faster after the user accepts a suggestion.
+			if (config.skipDebounceOnAccept) {
+				this.lastRequestTimestamp = 0;
+			}
+			if (
 			acceptedSuggestion &&
 			this.lastInlineEdit?.suggestion.id === acceptedSuggestion.id
 		) {

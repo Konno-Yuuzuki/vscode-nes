@@ -27,6 +27,11 @@ const INLINE_REQUEST_DEBOUNCE_MS = 300;
  *  Beyond this threshold a new request is originated instead, so slow
  *  server responses don't cascade-stall subsequent typing. */
 const PIGGYBACK_MAX_AGE_MS = 2_000;
+/** How long to wait for an in-flight request to settle when the user
+ *  typed punctuation / whitespace (which usually invalidates the model's
+ *  prediction). If it finishes within the window, reuse it instead of
+ *  cancelling and restarting; otherwise cancel and originate fresh. */
+const PIGGYBACK_GRACE_MS = 500;
 const MAX_FILE_CHUNK_LINES = 60;
 const BULK_CHANGE_LOOKBACK_MS = 1500;
 const BULK_CHANGE_CHAR_THRESHOLD = 200;
@@ -560,7 +565,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 
 		let sourceSnapshot: RequestSnapshot;
 		let responsePromise: Promise<AutocompleteResult[] | null>;
-		const piggyback = this.tryPiggyback(uri, requestSnapshot);
+		const piggyback = await this.tryPiggyback(uri, requestSnapshot);
 		if (piggyback) {
 			logger.debug(
 				`Piggybacking req=${requestId} on in-flight req=${piggyback.id}`,
@@ -858,14 +863,14 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		}
 	}
 
-	private tryPiggyback(
+	private async tryPiggyback(
 		uri: string,
 		newSnapshot: RequestSnapshot,
-	): {
+	): Promise<{
 		id: number;
 		snapshot: RequestSnapshot;
 		response: Promise<AutocompleteResult[] | null>;
-	} | null {
+	} | null> {
 		const inFlight = this.inFlightRequest;
 		if (!inFlight) return null;
 		if (inFlight.uri !== uri) return null;
@@ -879,15 +884,35 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 			inFlight.snapshot.cursorOffset,
 		);
 		if (!inserted) return null;
-		// Only piggyback for forward typing of identifier characters.
-		// Punctuation / whitespace usually mark a syntactic boundary the
-		// model's existing prediction won't extend through.
-		if (!/^\w+$/.test(inserted)) return null;
-		return {
-			id: inFlight.id,
-			snapshot: inFlight.snapshot,
-			response: inFlight.response,
-		};
+		// Identifier characters: reuse the in-flight request immediately —
+		// the model's prediction will almost certainly still apply.
+		if (/^\w+$/.test(inserted)) {
+			return {
+				id: inFlight.id,
+				snapshot: inFlight.snapshot,
+				response: inFlight.response,
+			};
+		}
+		// Punctuation / whitespace usually invalidate the prediction, but if
+		// the in-flight request settles within the grace window, reuse it
+		// rather than cancelling and restarting (avoids server waste from
+		// repeated half-completed requests).
+		const settled = await Promise.race([
+			inFlight.response.then(
+				() => true,
+				() => false,
+			),
+			new Promise<boolean>((resolve) =>
+				setTimeout(() => resolve(false), PIGGYBACK_GRACE_MS),
+			),
+		]);
+		return settled
+			? {
+					id: inFlight.id,
+					snapshot: inFlight.snapshot,
+					response: inFlight.response,
+				}
+			: null;
 	}
 
 	private cancelInFlightRequest(reason: string): void {

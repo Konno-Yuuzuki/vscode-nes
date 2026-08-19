@@ -164,7 +164,24 @@ function parseMarkerSpan(
 		markerBoundaryLines ??
 		regions.flatMap((region) => [region.startLine, region.endLine]);
 	const startLine = boundaryLines[start.num - 1];
-	const endLine = boundaryLines[endMarkerNum - 1];
+	let endLine = boundaryLines[endMarkerNum - 1];
+	// Tolerate truncation: when the model is cut off at max_tokens
+	// (finish=length), the closing marker is never emitted. Without an
+	// explicit end marker, extend the span to the last known boundary so
+	// the generated text is still surfaced instead of being discarded.
+	if (endLine === undefined && !explicitEnd) {
+		const lastBoundary = boundaryLines[boundaryLines.length - 1];
+		if (lastBoundary !== undefined && lastBoundary >= startLine) {
+			logger.debug("zeta2.1 marker span truncated; using last boundary", {
+				startMarker: start.num,
+				endMarker: endMarkerNum,
+				boundaryCount: boundaryLines.length,
+				startLine,
+				endLine: lastBoundary,
+			});
+			endLine = lastBoundary;
+		}
+	}
 	if (startLine === undefined || endLine === undefined || endLine < startLine) {
 		logger.debug("zeta2.1 marker span rejected: boundary line out of range", {
 			startMarker: start.num,

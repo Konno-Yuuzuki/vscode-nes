@@ -1504,6 +1504,11 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		// path where item.command is not executed by VS Code's inlineEdit.accept).
 		const suggestion = acceptedSuggestion ?? this.lastInlineEdit?.suggestion;
 
+		// Clear pendingProposedJump: the accept itself is the "cursor arrival"
+		// at the edit position, so maybeRetriggerAfterProposedJump does not need
+		// to fire a second request targeting the old edit line.
+		this.pendingProposedJump = null;
+
 		// Invalidate cache: the accepted suggestion is no longer relevant
 		if (suggestion?.uri) {
 			this.suggestionCache.invalidate(suggestion.uri);

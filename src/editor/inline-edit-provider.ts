@@ -26,12 +26,11 @@ const INLINE_REQUEST_DEBOUNCE_MS = 300;
 /** Max age (ms) of an in-flight request that can still be piggybacked.
  *  Beyond this threshold a new request is originated instead, so slow
  *  server responses don't cascade-stall subsequent typing. */
-const PIGGYBACK_MAX_AGE_MS = 2_000;
+const PIGGYBACK_MAX_AGE_MS = 8_000;
 /** How long to wait for an in-flight request to settle when the user
  *  typed punctuation / whitespace (which usually invalidates the model's
  *  prediction). If it finishes within the window, reuse it instead of
  *  cancelling and restarting; otherwise cancel and originate fresh. */
-const PIGGYBACK_GRACE_MS = 500;
 const MAX_FILE_CHUNK_LINES = 60;
 const BULK_CHANGE_LOOKBACK_MS = 1500;
 const BULK_CHANGE_CHAR_THRESHOLD = 200;
@@ -529,9 +528,10 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 				// mid-flight can confuse the server (llama.cpp) and delay
 				// the new request's response.  The old response will be
 				// discarded by isLatestRequest anyway.
-				if (!wasForceTriggered) {
-					this.cancelInFlightRequest("superseded by new request");
-				}
+				// Cancel moved to the piggyback-failure branch so that
+				// in-flight requests are kept alive while the user is still typing
+				// on the same file.  Old request is only cancelled when piggyback
+				// returns null (different URI / timeout / aborted).
 				this.rememberEditableContextWindow(document, requestSnapshot);
 				controller = new AbortController();
 				logger.trace(`setupOriginate: before buildInput for req=${requestId}`);
@@ -573,6 +573,11 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 			sourceSnapshot = piggyback.snapshot;
 			responsePromise = piggyback.response;
 		} else {
+			// Piggyback not available — cancel the old request (if any)
+			// and start a new one.
+			if (!wasForceTriggered) {
+				this.cancelInFlightRequest("superseded by new request");
+			}
 			sourceSnapshot = requestSnapshot;
 			responsePromise = setupOriginate();
 		}
@@ -877,33 +882,22 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		if (inFlight.controller.signal.aborted) return null;
 		// Don't piggyback on slow requests — the user is typing and deserves
 		// a fresh prediction, not a stale response that may never arrive.
-		if (Date.now() - inFlight.startedAt > PIGGYBACK_MAX_AGE_MS) return null;
-		const inserted = this.extractInsertedTextAtCursor(
-			inFlight.snapshot.content,
-			newSnapshot.content,
-			inFlight.snapshot.cursorOffset,
-		);
-		if (!inserted) return null;
-		// Identifier characters: reuse the in-flight request immediately —
-		// the model's prediction will almost certainly still apply.
-		if (/^\w+$/.test(inserted)) {
-			return {
-				id: inFlight.id,
-				snapshot: inFlight.snapshot,
-				response: inFlight.response,
-			};
-		}
-		// Punctuation / whitespace usually invalidate the prediction, but if
-		// the in-flight request settles within the grace window, reuse it
-		// rather than cancelling and restarting (avoids server waste from
-		// repeated half-completed requests).
+		const age = Date.now() - inFlight.startedAt;
+		if (age > PIGGYBACK_MAX_AGE_MS) return null;
+		// Wait for the in-flight request to settle (or timeout).
+		// Unlike the old character-based branching, this approach always waits
+		// for the running request — any subsequent keystroke piggybacks on the
+		// same in-flight request.  This eliminates repeated cancel-and-restart
+		// cycles on the server, which waste GPU time completing prompt evals
+		// that are immediately aborted.
+		const remaining = PIGGYBACK_MAX_AGE_MS - age;
 		const settled = await Promise.race([
 			inFlight.response.then(
 				() => true,
 				() => false,
 			),
 			new Promise<boolean>((resolve) =>
-				setTimeout(() => resolve(false), PIGGYBACK_GRACE_MS),
+				setTimeout(() => resolve(false), remaining),
 			),
 		]);
 		return settled

@@ -299,43 +299,16 @@ export function activate(context: vscode.ExtensionContext) {
 		},
 	);
 
-
-	const acceptInlineEditByTabCommand = vscode.commands.registerCommand(
-		"zeta.acceptInlineEditByTab",
-		async () => {
-			// 1) Try the native NES accept (works when the isInlineEdit
-			//    proposed-API gate is open).
-			try {
-				await vscode.commands.executeCommand(
-					"editor.action.inlineEdit.accept",
-				);
-				provider.handleInlineAccept();
-				return;
-			} catch {
-				// fall through
-			}
-			// 2) Try the regular inline-completion accept.
-			try {
-				await vscode.commands.executeCommand(
-					"editor.action.inlineSuggest.accept",
-				);
-				provider.handleInlineAccept();
-				return;
-			} catch {
-				// fall through
-			}
-			// 3) Manual fallback: apply the last suggestion ourselves.
-			provider.acceptCurrentInlineEdit();
+	const acceptJumpEditCommand = vscode.commands.registerCommand(
+		"zeta.acceptJumpEdit",
+		() => {
+			jumpEditManager.acceptJumpEdit();
+			// After accepting via the decoration path, trigger the next
+			// prediction (handleInlineAccept reads lastInlineEdit for the
+			// suggestion details, so no arguments needed).
 			provider.handleInlineAccept();
 		},
 	);
-
-
-	const acceptJumpEditCommand = vscode.commands.registerCommand(
-		"zeta.acceptJumpEdit",
-		() => jumpEditManager.acceptJumpEdit(),
-	);
-
 	const acceptJumpEditLineCommand = vscode.commands.registerCommand(
 		"zeta.acceptJumpEditLine",
 		() => jumpEditManager.acceptJumpEditLine(),
@@ -371,10 +344,33 @@ export function activate(context: vscode.ExtensionContext) {
 					),
 				);
 		},
-	);
+			);
 
-	statusBar = new SweepStatusBar(context, apiClient);
-	loadingIndicator = new LoadingIndicatorDecoration(apiClient);
+			const acceptInlineEditByTabCommand = vscode.commands.registerCommand(
+				"zeta.acceptInlineEditByTab",
+				() => {
+					// Try VS Code's native inline edit accept command first.
+					// If it's not available (custom build), fall back to manual.
+					// After accept, always trigger the next prediction via
+					// handleInlineAccept (which reads lastInlineEdit for the
+					// suggestion details, so no arguments needed).
+					void vscode.commands
+						.executeCommand("editor.action.inlineEdit.accept")
+						.then(
+							() => {
+								provider.handleInlineAccept();
+							},
+							() => {
+								// Fallback: apply the edit manually
+								provider.acceptCurrentInlineEdit();
+								provider.handleInlineAccept();
+							},
+						);
+				},
+			);
+
+			statusBar = new SweepStatusBar(context, apiClient);
+			loadingIndicator = new LoadingIndicatorDecoration(apiClient);
 	const statusBarCommands = registerStatusBarCommands(
 		context,
 		completionServer,
@@ -467,7 +463,7 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		providerDisposable,
 		triggerCommand,
-		acceptInlineEditByTabCommand,
+		acceptJumpEditCommand,
 		acceptJumpEditLineCommand,
 		acceptInlineEditCommand,
 		dismissJumpEditCommand,

@@ -811,9 +811,14 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 						this.clearSuggestionQueue(
 							"jump suggestion rendered as proposed inline edit",
 						);
+						this.jumpEditManager.clearJumpEdit();
 						logger.info("Edit classified as proposed VS Code inline edit", {
 							id: jumpResult.id,
 						});
+						// Dual-render: also set the decoration so the edit is
+						// visible even when the proposed API gate is not enabled
+						// by the custom VS Code build.
+						this.jumpEditManager.setPendingJumpEdit(document, jumpResult);
 						return proposedInlineEdit;
 					}
 				}
@@ -1141,11 +1146,6 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		// - correlationId always set
 		// - action = gutter menu link (always set)
 		// - NO showRange, NO displayLocation for regular edits
-		void vscode.commands.executeCommand(
-			"setContext",
-			"zeta.hasInlineSuggestion",
-			true,
-		);
 		if (useProposedInlineEditPresentation) {
 			const proposed = item as {
 				correlationId?: string;
@@ -1653,11 +1653,6 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		reason: string,
 		options?: { hideSuggestion?: boolean },
 	): void {
-		void vscode.commands.executeCommand(
-			"setContext",
-			"zeta.hasInlineSuggestion",
-			false,
-		);
 		if (!this.lastInlineEdit) return;
 		const shouldHideSuggestion = options?.hideSuggestion ?? true;
 

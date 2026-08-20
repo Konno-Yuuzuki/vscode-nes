@@ -811,14 +811,9 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 						this.clearSuggestionQueue(
 							"jump suggestion rendered as proposed inline edit",
 						);
-						this.jumpEditManager.clearJumpEdit();
 						logger.info("Edit classified as proposed VS Code inline edit", {
 							id: jumpResult.id,
 						});
-						// Dual-render: also set the decoration so the edit is
-						// visible even when the proposed API gate is not enabled
-						// by the custom VS Code build.
-						this.jumpEditManager.setPendingJumpEdit(document, jumpResult);
 						return proposedInlineEdit;
 					}
 				}

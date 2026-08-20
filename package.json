@@ -2,7 +2,7 @@
     "name": "zeta-edit-prediction",
     "displayName": "Zeta - Edit Prediction",
     "description": "Next Edit Autocomplete using Zeta Model",
-    "version": "1.2.8-build.79",
+    "version": "1.2.8-build.80",
     "publisher": "Yuuzuki",
     "author": {
         "name": "Yuuzuki"
@@ -117,6 +117,11 @@
                 "command": "editor.action.inlineSuggest.hide",
                 "key": "escape",
                 "when": "editorTextFocus && inlineSuggestionVisible && !zeta.hasJumpEdit"
+            },
+            {
+                "key": "tab",
+                "command": "zeta.acceptInlineEditByTab",
+                "when": "editorTextFocus && (inlineSuggestionVisible || inlineEditVisible) && !editorHasSelection"
             }
         ],
         "configurationDefaults": {

@@ -300,7 +300,32 @@ export function activate(context: vscode.ExtensionContext) {
 	);
 
 
-		const acceptJumpEditCommand = vscode.commands.registerCommand(
+	const acceptInlineEditByTabCommand = vscode.commands.registerCommand(
+		"zeta.acceptInlineEditByTab",
+		() => {
+			// Try the native NES accept first; if nothing NES is visible,
+			// fall back to the regular inline-completion accept. Either way,
+			// trigger the next prediction after acceptance.
+			void vscode.commands
+				.executeCommand("editor.action.inlineEdit.accept")
+				.then(
+					() => provider.handleInlineAccept(),
+					() => {
+						void vscode.commands
+							.executeCommand(
+								"editor.action.inlineSuggest.accept",
+							)
+							.then(
+								() => provider.handleInlineAccept(),
+								() => provider.handleInlineAccept(),
+							);
+					},
+				);
+		},
+	);
+
+
+	const acceptJumpEditCommand = vscode.commands.registerCommand(
 		"zeta.acceptJumpEdit",
 		() => jumpEditManager.acceptJumpEdit(),
 	);
@@ -436,6 +461,7 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		providerDisposable,
 		triggerCommand,
+		acceptInlineEditByTabCommand,
 		acceptJumpEditLineCommand,
 		acceptInlineEditCommand,
 		dismissJumpEditCommand,

@@ -302,25 +302,31 @@ export function activate(context: vscode.ExtensionContext) {
 
 	const acceptInlineEditByTabCommand = vscode.commands.registerCommand(
 		"zeta.acceptInlineEditByTab",
-		() => {
-			// Try the native NES accept first; if nothing NES is visible,
-			// fall back to the regular inline-completion accept. Either way,
-			// trigger the next prediction after acceptance.
-			void vscode.commands
-				.executeCommand("editor.action.inlineEdit.accept")
-				.then(
-					() => provider.handleInlineAccept(),
-					() => {
-						void vscode.commands
-							.executeCommand(
-								"editor.action.inlineSuggest.accept",
-							)
-							.then(
-								() => provider.handleInlineAccept(),
-								() => provider.handleInlineAccept(),
-							);
-					},
+		async () => {
+			// 1) Try the native NES accept (works when the isInlineEdit
+			//    proposed-API gate is open).
+			try {
+				await vscode.commands.executeCommand(
+					"editor.action.inlineEdit.accept",
 				);
+				provider.handleInlineAccept();
+				return;
+			} catch {
+				// fall through
+			}
+			// 2) Try the regular inline-completion accept.
+			try {
+				await vscode.commands.executeCommand(
+					"editor.action.inlineSuggest.accept",
+				);
+				provider.handleInlineAccept();
+				return;
+			} catch {
+				// fall through
+			}
+			// 3) Manual fallback: apply the last suggestion ourselves.
+			provider.acceptCurrentInlineEdit();
+			provider.handleInlineAccept();
 		},
 	);
 

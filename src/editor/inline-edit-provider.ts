@@ -1141,6 +1141,11 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		// - correlationId always set
 		// - action = gutter menu link (always set)
 		// - NO showRange, NO displayLocation for regular edits
+		void vscode.commands.executeCommand(
+			"setContext",
+			"zeta.hasInlineSuggestion",
+			true,
+		);
 		if (useProposedInlineEditPresentation) {
 			const proposed = item as {
 				correlationId?: string;
@@ -1648,6 +1653,11 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		reason: string,
 		options?: { hideSuggestion?: boolean },
 	): void {
+		void vscode.commands.executeCommand(
+			"setContext",
+			"zeta.hasInlineSuggestion",
+			false,
+		);
 		if (!this.lastInlineEdit) return;
 		const shouldHideSuggestion = options?.hideSuggestion ?? true;
 

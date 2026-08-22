@@ -900,12 +900,18 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 				setTimeout(() => resolve(false), remaining),
 			),
 		]);
+		// The in-flight request may have been aborted while we were
+		// waiting (e.g. another piggyback attempt timed out and
+		// cancelled it).  A cancelled request resolves with null,
+		// which would look like "done" to the race above — re-check
+		// the abort signal so we never piggyback on a dead request.
+		if (inFlight.controller.signal.aborted) return null;
 		return settled
 			? {
-					id: inFlight.id,
-					snapshot: inFlight.snapshot,
-					response: inFlight.response,
-				}
+				id: inFlight.id,
+				snapshot: inFlight.snapshot,
+				response: inFlight.response,
+			}
 			: null;
 	}
 

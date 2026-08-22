@@ -1154,6 +1154,9 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 				proposed.isInlineEdit = true;
 				proposed.showInlineEditMenu = true;
 			}
+			logger.debug(
+				`buildCompletionItem: isInlineEdit=${(proposed as any).isInlineEdit} isInlineCompletion=${isInlineCompletion} id=${result.id}`,
+			);
 		}
 
 		this.lastInlineEdit = {

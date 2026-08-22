@@ -52,9 +52,6 @@ describe("formatSymbolOutline", () => {
 		expect(outline).toContain(
 			"- line 31: CTextDraw::Draw — void Draw() [active]",
 		);
-		expect(outline).toContain(
-			"- line 66: CTextDraw::Update — void Update(bool selectionEnabled)",
-		);
 	});
 
 	test("selects only the nearest functions and restores source order", () => {

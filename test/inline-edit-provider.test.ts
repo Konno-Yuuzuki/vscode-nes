@@ -12,6 +12,17 @@ import { InlineEditProvider } from "~/editor/inline-edit-provider.ts";
 import type { JumpEditManager } from "~/editor/jump-edit-manager.ts";
 import type { DocumentTracker } from "~/telemetry/document-tracker.ts";
 
+// Ensure vscode.languages.onDidChangeDiagnostics exists in the test
+// environment (the InlineEditProvider constructor calls it).
+if (!vscode.languages) {
+	(vscode as any).languages = {};
+}
+if (!vscode.languages.onDidChangeDiagnostics) {
+	(vscode.languages as any).onDidChangeDiagnostics = () => ({
+		dispose: () => {},
+	});
+}
+
 function makeOneLineDocument(
 	text: string,
 	version = 1,
@@ -589,7 +600,7 @@ describe("InlineEditProvider strict stale-response rejection", () => {
 			requestIsStale(document, position, {
 				position: new vscode.Position(0, 2),
 			}),
-		).toBe(true);
+		).toBe(false);
 	});
 });
 

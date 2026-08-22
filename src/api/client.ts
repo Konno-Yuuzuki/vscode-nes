@@ -150,7 +150,8 @@ export function excludeSweepBroadWindowChanges(
 	cursorLine: number,
 	editableTokens: number,
 ): RecentChange[] {
-	const endLine = broadWindow.end;
+	const startLine = Math.max(0, cursorLine - editableTokens / 2);
+	const endLine = Math.min(lines.length, cursorLine + editableTokens / 2);
 	return changes.filter((change) => {
 		if (toUnixPath(change.path) !== activeFilePath) return true;
 		const hunks = parseNewSideRanges(change.diff);

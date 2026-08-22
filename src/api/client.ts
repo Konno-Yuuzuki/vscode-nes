@@ -650,6 +650,7 @@ export class ApiClient {
 						config.editableTokens,
 						config.zetaContextTokens,
 						(line) => document.lineAt(line).text,
+						config.syntaxAwareExpansion,
 					)
 				: null;
 		const zetaContextRange = zetaWindow

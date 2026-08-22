@@ -347,7 +347,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		 *  stall all subsequent typing. */
 		startedAt: number;
 	} | null = null;
-	private lastRequestTimestamp = 0;
+	private lastRequestTimestampByUri = new Map<string, number>();
 	/** Content snapshot from the last invocation that passed the content-change
 	 *  check. Used to avoid re-triggering on cursor-movement-only invocations
 	 *  after the file has been edited. */
@@ -510,7 +510,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 
 		if (token.isCancellationRequested) return undefined;
 
-		const shouldContinue = await this.waitForDebounce(requestId, token);
+		const shouldContinue = await this.waitForDebounce(requestId, token, document.uri.toString());
 		if (!shouldContinue) return undefined;
 		if (!this.isLatestRequest(requestId)) return undefined;
 
@@ -977,10 +977,11 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 	private async waitForDebounce(
 			requestId: number,
 			token: vscode.CancellationToken,
+			uri: string,
 		): Promise<boolean> {
 			const now = Date.now();
-			const elapsed = now - this.lastRequestTimestamp;
-			this.lastRequestTimestamp = now;
+			const elapsed = now - (this.lastRequestTimestampByUri.get(uri) ?? 0);
+			this.lastRequestTimestampByUri.set(uri, now);
 
 			const dynamicDebounceMs = this.debounceTracker.computeDebounceMs(
 				elapsed,
@@ -1179,6 +1180,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 				config.editableTokens,
 				config.zetaContextTokens,
 				(line) => document.lineAt(line).text,
+				config.syntaxAwareExpansion,
 			);
 			startLine = window.editableStart;
 			endLine = window.editableEnd;
@@ -1189,6 +1191,7 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 				config.editableTokens,
 				config.zetaContextTokens,
 				(line) => document.lineAt(line).text,
+				config.syntaxAwareExpansion,
 			);
 			startLine = window.editableStart;
 			endLine = window.editableEnd;
@@ -1522,7 +1525,8 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		// P3 B: skip the next debounce so the follow-up prediction arrives
 		// faster after the user accepts a suggestion.
 		if (config.skipDebounceOnAccept) {
-			this.lastRequestTimestamp = 0;
+			const acceptUri = suggestion?.uri;
+			if (acceptUri) this.lastRequestTimestampByUri.set(acceptUri, 0);
 		}
 		// Clear lastInlineEdit when the suggestion matches
 		if (suggestion && this.lastInlineEdit?.suggestion.id === suggestion.id) {

@@ -26,11 +26,7 @@ const INLINE_REQUEST_DEBOUNCE_MS = 300;
 /** Max age (ms) of an in-flight request that can still be piggybacked.
  *  Beyond this threshold a new request is originated instead, so slow
  *  server responses don't cascade-stall subsequent typing. */
-const PIGGYBACK_MAX_AGE_MS = 8_000;
-/** How long to wait for an in-flight request to settle when the user
- *  typed punctuation / whitespace (which usually invalidates the model's
- *  prediction). If it finishes within the window, reuse it instead of
- *  cancelling and restarting; otherwise cancel and originate fresh. */
+const PIGGYBACK_MAX_AGE_MS = 1_500;
 const MAX_FILE_CHUNK_LINES = 60;
 const BULK_CHANGE_LOOKBACK_MS = 1500;
 const BULK_CHANGE_CHAR_THRESHOLD = 200;
@@ -880,40 +876,25 @@ export class InlineEditProvider implements vscode.InlineCompletionItemProvider {
 		if (!inFlight) return null;
 		if (inFlight.uri !== uri) return null;
 		if (inFlight.controller.signal.aborted) return null;
-		// Don't piggyback on slow requests — the user is typing and deserves
-		// a fresh prediction, not a stale response that may never arrive.
-		const age = Date.now() - inFlight.startedAt;
-		if (age > PIGGYBACK_MAX_AGE_MS) return null;
-		// Wait for the in-flight request to settle (or timeout).
-		// Unlike the old character-based branching, this approach always waits
-		// for the running request — any subsequent keystroke piggybacks on the
-		// same in-flight request.  This eliminates repeated cancel-and-restart
-		// cycles on the server, which waste GPU time completing prompt evals
-		// that are immediately aborted.
-		const remaining = PIGGYBACK_MAX_AGE_MS - age;
-		const settled = await Promise.race([
-			inFlight.response.then(
-				() => true,
-				() => false,
-			),
-			new Promise<boolean>((resolve) =>
-				setTimeout(() => resolve(false), remaining),
-			),
-		]);
-		// The in-flight request may have been aborted while we were
-		// waiting (e.g. another piggyback attempt timed out and
-		// cancelled it).  A cancelled request resolves with null,
-		// which would look like "done" to the race above — re-check
-		// the abort signal so we never piggyback on a dead request.
-		if (inFlight.controller.signal.aborted) return null;
-		return settled
-			? {
-				id: inFlight.id,
-				snapshot: inFlight.snapshot,
-				response: inFlight.response,
+		// Quick decision, never block: only piggyback on YOUNG requests.
+				// A request older than this is stale — the user's context has moved
+				// on, so waiting for it wastes time and its result would be wrong.
+				// The next keystroke will cancel it and originate fresh instead.
+				const age = Date.now() - inFlight.startedAt;
+				if (age > PIGGYBACK_MAX_AGE_MS) return null;
+				// Reuse the in-flight request's response promise directly. No
+				// blocking race-wait here: the caller awaits the shared promise,
+				// and subsequent keystrokes re-evaluate this function — once the
+				// request ages past the threshold they cancel it and start fresh.
+				// (The old implementation waited up to 8s here before cancelling a
+				// nearly-complete request — every keystroke stalled ~8s and the
+				// server's work was thrown away right at the finish line.)
+				return {
+					id: inFlight.id,
+					snapshot: inFlight.snapshot,
+					response: inFlight.response,
+				};
 			}
-			: null;
-	}
 
 	private cancelInFlightRequest(reason: string): void {
 		if (!this.inFlightRequest) return;
